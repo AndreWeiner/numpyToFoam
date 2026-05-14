@@ -166,7 +166,7 @@ for version in "${versions[@]}"; do
     case_dir="$version_folder/of_cavity"
     log_icoFoam="$case_dir/log.icoFoam"
     cd "$case_dir" || exit 1
-
+    sed -i 's/mpirun[[:space:]]\+-np/mpirun --oversubscribe -np/g' Allrun
     apptainer exec "$image" bash -lc "$source && ./Allrun" \
         > "$log_allrun" 2>&1
     allrun_ok=$(( $? == 0 ))
