@@ -229,6 +229,9 @@ for version in "${versions[@]}"; do
 
         echo "----- log.Allrun -----"
         tail -n 80 "$log_allrun" || true
+
+        echo "----- Allrun file -----"
+        cat "$case_dir/Allrun" || true
         
         echo "----- log.icoFoam -----"
         tail -n 80 "$log_icoFoam" || true
