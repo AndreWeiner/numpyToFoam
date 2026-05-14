@@ -28,7 +28,6 @@ jobs:
         run: |
           apptainer exec openfoam2112.sif bash -lc '
             echo "Inside Apptainer image"
-            whoami
             source /usr/lib/openfoam/openfoam2112/etc/bashrc
-            foamVersion
+            echo "OpenFOAM version: $WM_PROJECT_VERSION"
           '
