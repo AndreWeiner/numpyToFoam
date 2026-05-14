@@ -20,14 +20,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y apptainer
 
-      - name: Pull Apptainer image from GHCR
+      - name: Check Apptainer
         run: |
-          apptainer pull openfoam2112.sif oras://ghcr.io/tanujravi/openfoam2112:default
+          apptainer --version
 
-      - name: Test image
+      - name: Run numpyToFoam unit test
         run: |
-          apptainer exec openfoam2112.sif bash -lc '
-            echo "Inside Apptainer image"
-            source /usr/lib/openfoam/openfoam2112/etc/bashrc
-            echo "OpenFOAM version: $WM_PROJECT_VERSION"
-          '
+          chmod +x unittest/actions_unittest.sh
+          bash unittest/actions_unittest.sh
