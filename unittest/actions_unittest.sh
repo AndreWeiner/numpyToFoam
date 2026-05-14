@@ -164,6 +164,7 @@ for version in "${versions[@]}"; do
     cp -r "$simulation_base_name" .
 
     case_dir="$version_folder/of_cavity"
+    log_icoFoam="$case_dir/log.icoFoam"
     cd "$case_dir" || exit 1
 
     apptainer exec "$image" bash -lc "$source && ./Allrun" \
@@ -228,7 +229,10 @@ for version in "${versions[@]}"; do
 
         echo "----- log.Allrun -----"
         tail -n 80 "$log_allrun" || true
-
+        
+        echo "----- log.icoFoam -----"
+        tail -n 80 "$log_icoFoam" || true
+        
         echo "----- log.foamToNumpy -----"
         tail -n 80 "$log_foamToNumpy_run" || true
 
