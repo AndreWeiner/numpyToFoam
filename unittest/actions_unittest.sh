@@ -197,18 +197,26 @@ for version in "${versions[@]}"; do
             checksum_ok=0
         fi
     fi
-
+    
+    foamToNumpy_build_status=$([ "$foamToNumpy_build_ok" -eq 1 ] && echo "success" || echo "failed")
+    numpyToFoam_build_status=$([ "$numpyToFoam_build_ok" -eq 1 ] && echo "success" || echo "failed")
+    allrun_status=$([ "$allrun_ok" -eq 1 ] && echo "success" || echo "failed")
+    foamToNumpy_run_status=$([ "$foamToNumpy_run_ok" -eq 1 ] && echo "success" || echo "failed")
+    clean_proc_data_status=$([ "$clean_proc_data_ok" -eq 1 ] && echo "success" || echo "failed")
+    numpyToFoam_run_status=$([ "$numpyToFoam_run_ok" -eq 1 ] && echo "success" || echo "failed")
+    checksum_status=$([ "$checksum_ok" -eq 1 ] && echo "success" || echo "failed")
+    
     echo "----------------------------------------"
     echo "Version: $version"
-    echo "foamToNumpy build      : $foamToNumpy_build_ok"
-    echo "numpyToFoam build      : $numpyToFoam_build_ok"
-    echo "Allrun                 : $allrun_ok"
-    echo "foamToNumpy run        : $foamToNumpy_run_ok"
-    echo "Clean_proc_data        : $clean_proc_data_ok"
-    echo "numpyToFoam run        : $numpyToFoam_run_ok"
-    echo "checksum match         : $checksum_ok"
+    echo "foamToNumpy build      : $foamToNumpy_build_status"
+    echo "numpyToFoam build      : $numpyToFoam_build_status"
+    echo "Allrun                 : $allrun_status"
+    echo "foamToNumpy run        : $foamToNumpy_run_status"
+    echo "Clean_proc_data        : $clean_proc_data_status"
+    echo "numpyToFoam run        : $numpyToFoam_run_status"
+    echo "checksum match         : $checksum_status"
     echo "----------------------------------------"
-
+    
     if [ "$foamToNumpy_build_ok" -ne 1 ] || \
        [ "$numpyToFoam_build_ok" -ne 1 ] || \
        [ "$allrun_ok" -ne 1 ] || \
