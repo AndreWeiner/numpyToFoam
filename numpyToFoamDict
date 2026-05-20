@@ -13,7 +13,7 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 dataDir       data;
-fields        (p U UPrime2Mean);
+fields        (p U);
 time          
 {
     startTime     8.0;
