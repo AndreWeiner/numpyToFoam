@@ -286,6 +286,51 @@ Replace `2` with the number of processors used for case decomposition.
 
 > **Note — skip-on-conflict behaviour**
 > If the output directory for a field or an `exportData` entry already exists, that export is skipped with a warning and no data is overwritten. Remove or rename the existing output directories before re-running to avoid silent skips.
+---
+
+# For Developers
+
+A unit test framework is provided to validate both utilities across multiple OpenFOAM versions using Apptainer containers. The pipeline runs an `icoFoam` cavity simulation, exports the results to `.npy` with `foamToNumpy`, reconstructs the fields with `numpyToFoam`, and verifies correctness by comparing MD5 checksums of the reconstructed processor field files against the original simulation output.
+
+**Tested OpenFOAM versions:** 2112, 2206, 2312, 2412, 2512
+
+For each version the following steps are executed in order:
+
+| Step | Description |
+|------|-------------|
+| `foamToNumpy build` | Compiles `foamToNumpy` inside the container |
+| `numpyToFoam build` | Compiles `numpyToFoam` inside the container |
+| `Allrun` | Runs the `icoFoam` cavity simulation |
+| `foamToNumpy run` | Exports simulation fields to `.npy` |
+| `Clean_proc_data` | Removes the original OpenFOAM field data from the processor directories |
+| `numpyToFoam run` | Reconstructs fields from `.npy` |
+| `checksum match` | Compares MD5 checksums of reconstructed vs. original fields |
+
+A pass/fail status is printed for each step and version at the end of the run.
+
+---
+
+## Local
+
+### Prerequisites
+- [Apptainer](https://apptainer.org) installed
+
+### Running
+
+```bash
+cd unittest
+bash unittest.sh
+```
+
+On the **first run**, the script builds an Apptainer `.sif` image for each OpenFOAM version from Docker Hub and caches them in `unittest/of_versions/`. Subsequent runs reuse the cached images and skip the build step. Logs for each step are written to `unittest/run/of{version}/`.
+
+---
+
+## GitHub Actions
+
+The CI pipeline is defined in [`.github/workflows/main.yml`](.github/workflows/main.yml) and triggers automatically on every push and pull request. It runs `unittest/actions_unittest.sh`, which pulls pre-built Apptainer images from the GitHub Container Registry (GHCR) instead of building them locally, making it faster.
+
+To monitor a run, go to the **Actions** tab of the repository, select the `numpyToFoamTest` workflow, and open the latest run. If any step fails, the last few lines of every relevant log file are printed and the workflow exits with a non-zero status.
 
 ---
 
@@ -310,3 +355,10 @@ Replace `2` with the number of processors used for case decomposition.
 5. **No region-based data write** (`numpyToFoam`, `foamToNumpy`)
    - Writing data for specific mesh regions is not currently supported
    - This feature is planned for a future update
+
+6. **Boundary data not supported** (`numpyToFoam`, `foamToNumpy`)
+   - Only internal cell data is read and written; boundary patch field values are not handled
+
+7. **Finite area fields not supported** (`numpyToFoam`, `foamToNumpy`)
+   - Only volumetric field types are supported;
+

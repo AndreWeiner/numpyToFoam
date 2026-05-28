@@ -39,12 +39,12 @@ Description
 int main(int argc, char *argv[])
 {
     argList::addOption("dict", "file", "Alternative foamToNumpyDict");
-    #include "setRootCase.H"
-    #include "createTime.H"
-    #include "createMesh.H"
+#include "setRootCase.H"
+#include "createTime.H"
+#include "createMesh.H"
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-    Info<< nl;
+    Info << nl;
     runTime.printExecutionTime(Info);
     const word dictName("foamToNumpyDict");
 
@@ -53,7 +53,7 @@ int main(int argc, char *argv[])
     if (args.readIfPresent("dict", dictPath))
     {
         // Dictionary specified on the command-line ...
- 
+
         if (isDir(dictPath))
         {
             dictPath /= dictName;
@@ -62,19 +62,16 @@ int main(int argc, char *argv[])
     else
     {
         // Assume dictionary is to be found in the system directory
- 
-        dictPath = runTime.system()/dictName;
+
+        dictPath = runTime.system() / dictName;
     }
 
-    
-    IOobject DictIO
-    (
+    IOobject DictIO(
         dictPath,
         runTime,
         IOobject::MUST_READ,
         IOobject::NO_WRITE,
-        false
-    );
+        false);
 
     if (!DictIO.typeHeaderOk<IOdictionary>(true))
     {
@@ -83,31 +80,29 @@ int main(int argc, char *argv[])
             << exit(FatalError);
     }
 
-    Info<< "Reading foamToNumpy settings from "
-        << DictIO.objectRelPath() << endl;
-        
-        
+    Info << "Reading foamToNumpy settings from "
+         << DictIO.objectRelPath() << endl;
+
     const IOdictionary dict(DictIO);
 
     wordList fields;
 
     word dataTypeWord_field = "float64";
     npyType dtype_field = parseNpyType(dataTypeWord_field);
-    
+
     if (dict.found("fields"))
     {
-        const dictionary& fieldDict = dict.subDict("fields");
+        const dictionary &fieldDict = dict.subDict("fields");
         fields = fieldDict.get<wordList>("names");
         dataTypeWord_field = fieldDict.getOrDefault<word>("dataType", "float64");
         dtype_field = parseNpyType(dataTypeWord_field);
     }
 
-
-    const dictionary& timeDict = dict.subDict("time");
+    const dictionary &timeDict = dict.subDict("time");
     const scalar t_start = timeDict.get<scalar>("startTime");
-    const scalar t_end   = timeDict.get<scalar>("endTime");
-    const label every      = timeDict.get<label>("every");
-    
+    const scalar t_end = timeDict.get<scalar>("endTime");
+    const label every = timeDict.get<label>("every");
+
     bool writeCellCentre = false;
     bool writeCellVolumes = false;
     bool writeWriteTimes = false;
@@ -117,7 +112,7 @@ int main(int argc, char *argv[])
 
     if (dict.found("exportData"))
     {
-        const dictionary& exportDict = dict.subDict("exportData");
+        const dictionary &exportDict = dict.subDict("exportData");
         writeCellCentre = exportDict.getOrDefault<bool>("cellCentre", false);
         writeCellVolumes = exportDict.getOrDefault<bool>("cellVolumes", false);
         writeWriteTimes = exportDict.getOrDefault<bool>("writeTimes", false);
@@ -131,14 +126,14 @@ int main(int argc, char *argv[])
     fileName rootCaseDir = caseDir.path(); // .../case
     fileName dataSubDir = dict.getOrDefault<fileName>("dataDir", "data");
     fileName dataDir;
-    
+
     if (dataSubDir.isAbsolute())
     {
         dataDir = dataSubDir;
     }
     else
     {
-        dataDir = rootCaseDir/dataSubDir;
+        dataDir = rootCaseDir / dataSubDir;
     }
 
     if (Pstream::master() && !isDir(dataDir))
@@ -159,7 +154,7 @@ int main(int argc, char *argv[])
 
     forAll(allTimes, i)
     {
-        const instant& t = allTimes[i];
+        const instant &t = allTimes[i];
 
         // Skip constant
         if (t.name() == runTime.constant())
@@ -189,16 +184,16 @@ int main(int argc, char *argv[])
     }
 
     runTime.setTime(selectedTimes[0], 0);
-    
-    //List<fieldMeta> metadata(fields.size());
+
+    // List<fieldMeta> metadata(fields.size());
     DynamicList<fieldMeta> metadata;
-    
-    Info<< "Inspecting fields at initial selected time "
-        << runTime.timeName() << nl;
+
+    Info << "Inspecting fields at initial selected time "
+         << runTime.timeName() << nl;
     forAll(fields, i)
     {
-        const word& fieldName = fields[i];
-        const fileName fieldDir = dataDir/fieldName;
+        const word &fieldName = fields[i];
+        const fileName fieldDir = dataDir / fieldName;
 
         bool skipField = false;
         if (Pstream::master())
@@ -216,23 +211,21 @@ int main(int argc, char *argv[])
                 mkDir(fieldDir);
             }
         }
-        
-        reduce(skipField, orOp<bool>());        
-        
+
+        reduce(skipField, orOp<bool>());
+
         if (skipField)
         {
             continue;
         }
 
-        IOobject io
-        (
+        IOobject io(
             fieldName,
             runTime.timeName(),
             mesh,
             IOobject::MUST_READ,
             IOobject::NO_WRITE,
-            false
-        );
+            false);
 
         if (!io.typeHeaderOk<regIOobject>(false))
         {
@@ -243,7 +236,7 @@ int main(int argc, char *argv[])
         }
 
         const word cls = io.headerClassName();
-        
+
         fieldMeta meta;
         meta.name = fieldName;
         meta.className = cls;
@@ -281,23 +274,17 @@ int main(int argc, char *argv[])
                 << exit(FatalError);
         }
 
-
         meta.outFile =
-            fieldDir/
-            (
-                fieldName
-              + "_proc_"
-              + Foam::name(Pstream::myProcNo())
-              + ".npy"
-            );
-        
+            fieldDir /
+            (fieldName + "_proc_" + Foam::name(Pstream::myProcNo()) + ".npy");
+
         metadata.append(meta);
 
-        Info<< "Field " << meta.name
-            << " : class=" << meta.className
-            << ", nCells=" << meta.nCells
-            << ", nComp=" << meta.nComp
-            << nl;
+        Info << "Field " << meta.name
+             << " : class=" << meta.className
+             << ", nCells=" << meta.nCells
+             << ", nComp=" << meta.nComp
+             << nl;
     }
 
     // ------------------------------------------------------------
@@ -307,44 +294,37 @@ int main(int argc, char *argv[])
     // actual per-field write loop
     forAll(metadata, i)
     {
-        const fieldMeta& meta = metadata[i];
+        const fieldMeta &meta = metadata[i];
         const std::vector<std::size_t> shape =
             makeShape(selectedTimes.size(), meta.nCells, meta.nComp);
 
         const fileName fieldPattern =
-            (dataDir/meta.name)/
-            (
-                meta.name
-            + "_proc_*.npy"
-            );
+            (dataDir / meta.name) /
+            (meta.name + "_proc_*.npy");
 
-        Info<< "Writing field " << meta.name
-            << " to " << fieldPattern << nl;            
+        Info << "Writing field " << meta.name
+             << " to " << fieldPattern << nl;
 
         if (meta.kind == fieldKind::SCALAR)
         {
-            npyWriter<volScalarField> writer
-            (
+            npyWriter<volScalarField> writer(
                 meta,
                 shape,
                 dtype_field,
                 fortranOrder,
-                selectedTimes.size()
-            );
+                selectedTimes.size());
 
             forAll(selectedTimes, timei)
             {
                 runTime.setTime(selectedTimes[timei], timei);
 
-                IOobject io
-                (
+                IOobject io(
                     meta.name,
                     runTime.timeName(),
                     mesh,
                     IOobject::MUST_READ,
                     IOobject::NO_WRITE,
-                    false
-                );
+                    false);
 
                 volScalarField fld(io, mesh);
                 writer.write(fld, timei);
@@ -354,28 +334,24 @@ int main(int argc, char *argv[])
         }
         else if (meta.kind == fieldKind::VECTOR)
         {
-            npyWriter<volVectorField> writer
-            (
+            npyWriter<volVectorField> writer(
                 meta,
                 shape,
                 dtype_field,
                 fortranOrder,
-                selectedTimes.size()
-            );
+                selectedTimes.size());
 
             forAll(selectedTimes, timei)
             {
                 runTime.setTime(selectedTimes[timei], timei);
 
-                IOobject io
-                (
+                IOobject io(
                     meta.name,
                     runTime.timeName(),
                     mesh,
                     IOobject::MUST_READ,
                     IOobject::NO_WRITE,
-                    false
-                );
+                    false);
 
                 volVectorField fld(io, mesh);
                 writer.write(fld, timei);
@@ -385,28 +361,24 @@ int main(int argc, char *argv[])
         }
         else if (meta.kind == fieldKind::SYMM_TENSOR)
         {
-            npyWriter<volSymmTensorField> writer
-            (
+            npyWriter<volSymmTensorField> writer(
                 meta,
                 shape,
                 dtype_field,
                 fortranOrder,
-                selectedTimes.size()
-            );
+                selectedTimes.size());
 
             forAll(selectedTimes, timei)
             {
                 runTime.setTime(selectedTimes[timei], timei);
 
-                IOobject io
-                (
+                IOobject io(
                     meta.name,
                     runTime.timeName(),
                     mesh,
                     IOobject::MUST_READ,
                     IOobject::NO_WRITE,
-                    false
-                );
+                    false);
 
                 volSymmTensorField fld(io, mesh);
                 writer.write(fld, timei);
@@ -416,28 +388,24 @@ int main(int argc, char *argv[])
         }
         else if (meta.kind == fieldKind::TENSOR)
         {
-            npyWriter<volTensorField> writer
-            (
+            npyWriter<volTensorField> writer(
                 meta,
                 shape,
                 dtype_field,
                 fortranOrder,
-                selectedTimes.size()
-            );
+                selectedTimes.size());
 
             forAll(selectedTimes, timei)
             {
                 runTime.setTime(selectedTimes[timei], timei);
 
-                IOobject io
-                (
+                IOobject io(
                     meta.name,
                     runTime.timeName(),
                     mesh,
                     IOobject::MUST_READ,
                     IOobject::NO_WRITE,
-                    false
-                );
+                    false);
 
                 volTensorField fld(io, mesh);
                 writer.write(fld, timei);
@@ -449,22 +417,21 @@ int main(int argc, char *argv[])
 
     if (writeWriteTimes && Pstream::master())
     {
-        const fileName timesDir = dataDir/"times";
+        const fileName timesDir = dataDir / "times";
 
-        
         if (isDir(timesDir))
         {
             WarningInFunction
                 << "Output directory already exists for times export." << nl
                 << "Skipping times export." << nl
                 << "Directory: " << timesDir << nl;
-        }        
-        
+        }
+
         else
         {
-            
-            mkDir(timesDir);                                                                                                                
-            
+
+            mkDir(timesDir);
+
             scalarField timesFld(selectedTimes.size());
 
             forAll(selectedTimes, i)
@@ -478,21 +445,19 @@ int main(int argc, char *argv[])
             timesMeta.kind = fieldKind::SCALAR;
             timesMeta.nCells = timesFld.size();
             timesMeta.nComp = 1;
-            timesMeta.outFile = timesDir/"times.npy";
-            Info<< "Writing " << timesMeta.name
-                << " to " << timesMeta.outFile << nl;
+            timesMeta.outFile = timesDir / "times.npy";
+            Info << "Writing " << timesMeta.name
+                 << " to " << timesMeta.outFile << nl;
 
             const std::vector<std::size_t> timesShape =
                 makeShape(1, timesMeta.nCells, timesMeta.nComp);
 
-            npyWriter<scalarField> timesWriter
-            (
+            npyWriter<scalarField> timesWriter(
                 timesMeta,
                 timesShape,
                 dtype_export,
                 fortranOrder,
-                1
-            );
+                1);
 
             timesWriter.write(timesFld, 0);
             timesWriter.flush();
@@ -501,7 +466,7 @@ int main(int argc, char *argv[])
 
     if (writeCellCentre)
     {
-        const fileName centreDir = dataDir/"cellCentre";
+        const fileName centreDir = dataDir / "cellCentre";
         bool skipCellCentre = false;
 
         if (Pstream::master())
@@ -520,11 +485,11 @@ int main(int argc, char *argv[])
             }
         }
 
-        reduce(skipCellCentre, orOp<bool>());  
+        reduce(skipCellCentre, orOp<bool>());
 
         if (!skipCellCentre)
         {
-            const volVectorField& C = mesh.C();
+            const volVectorField &C = mesh.C();
 
             fieldMeta centreMeta;
             centreMeta.name = "cellCentre";
@@ -533,35 +498,25 @@ int main(int argc, char *argv[])
             centreMeta.nCells = C.size();
             centreMeta.nComp = 3;
             centreMeta.outFile =
-                centreDir/
-                (
-                    "cellCentre_proc_"
-                + Foam::name(Pstream::myProcNo())
-                + ".npy"
-                );
-                
+                centreDir /
+                ("cellCentre_proc_" + Foam::name(Pstream::myProcNo()) + ".npy");
+
             const fileName fieldPattern =
-                (dataDir/centreMeta.name)/
-                (
-                    centreMeta.name
-                + "_proc_*.npy"
-                );
+                (dataDir / centreMeta.name) /
+                (centreMeta.name + "_proc_*.npy");
 
-            Info<< "Writing field " << centreMeta.name
-                << " to " << fieldPattern << nl;
-
+            Info << "Writing field " << centreMeta.name
+                 << " to " << fieldPattern << nl;
 
             const std::vector<std::size_t> shape =
                 makeShape(1, centreMeta.nCells, centreMeta.nComp);
 
-            npyWriter<volVectorField> writer
-            (
+            npyWriter<volVectorField> writer(
                 centreMeta,
                 shape,
                 dtype_export,
                 fortranOrder,
-                1
-            );
+                1);
 
             writer.write(C, 0);
             writer.flush();
@@ -570,7 +525,7 @@ int main(int argc, char *argv[])
 
     if (writeCellVolumes)
     {
-        const fileName volDir = dataDir/"cellVolumes";
+        const fileName volDir = dataDir / "cellVolumes";
         bool skipCellVolumes = false;
 
         if (Pstream::master())
@@ -592,7 +547,7 @@ int main(int argc, char *argv[])
 
         if (!skipCellVolumes)
         {
-            const scalarField& V = mesh.V();
+            const scalarField &V = mesh.V();
 
             fieldMeta volMeta;
             volMeta.name = "cellVolumes";
@@ -601,39 +556,29 @@ int main(int argc, char *argv[])
             volMeta.nCells = V.size();
             volMeta.nComp = 1;
             volMeta.outFile =
-                volDir/
-                (
-                    "cellVolumes_proc_"
-                + Foam::name(Pstream::myProcNo())
-                + ".npy"
-                );
+                volDir /
+                ("cellVolumes_proc_" + Foam::name(Pstream::myProcNo()) + ".npy");
 
             const fileName fieldPattern =
-                (dataDir/volMeta.name)/
-                (
-                    volMeta.name
-                + "_proc_*.npy"
-                );
+                (dataDir / volMeta.name) /
+                (volMeta.name + "_proc_*.npy");
 
-            Info<< "Writing field " << volMeta.name
-                << " to " << fieldPattern << nl;
-
+            Info << "Writing field " << volMeta.name
+                 << " to " << fieldPattern << nl;
 
             const std::vector<std::size_t> shape =
                 makeShape(1, volMeta.nCells, volMeta.nComp);
 
-            npyWriter<scalarField> writer
-            (
+            npyWriter<scalarField> writer(
                 volMeta,
                 shape,
                 dtype_export,
                 fortranOrder,
-                1
-            );
+                1);
 
             writer.write(V, 0);
             writer.flush();
         }
     }
 }
-    // ************************************************************************* //
+// ************************************************************************* //
