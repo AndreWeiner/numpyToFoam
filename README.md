@@ -19,7 +19,7 @@ These snapshots are processed sequentially in time, avoiding the need to store l
 In a working OpenFOAM environment:
 
 ```bash
-cd src
+cd src/numpyToFoam
 wmake
 ```
 
@@ -60,12 +60,6 @@ dataDir/fieldName/fieldName_proc_i.npy
 where:
 - `fieldName` is the OpenFOAM field name, for example `p` or `U`
 - `i` is the processor index
-
-If there are:
-- `p` processors
-- `n` fields
-
-then the total number of `.npy` files is `n × p`.
 
 #### Supported Shapes
 
@@ -133,7 +127,7 @@ Replace `2` with the number of processors used for case decomposition.
 ## General Description
 `foamToNumpy` is a custom OpenFOAM utility for extracting OpenFOAM field data into NumPy (`.npy`) arrays. It is the reverse of `numpyToFoam`. It supports scalar, vector, symmetric tensor, and full tensor fields.
 
-For each selected time step, the field values over the computational cells constitute a **snapshot**. All snapshots for a given field are packed into a single `.npy` file per processor, avoiding repeated file I/O.
+All snapshots for a given field are packed into a single `.npy` file per processor, avoiding repeated file I/O.
 
 The utility can optionally export mesh geometry data (cell centres, cell volumes) and the selected time values as additional `.npy` files.
 
