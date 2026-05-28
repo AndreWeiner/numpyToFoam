@@ -39,9 +39,9 @@ Description
 int main(int argc, char *argv[])
 {
     argList::addOption("dict", "file", "Alternative foamToNumpyDict");
-#include "setRootCase.H"
-#include "createTime.H"
-#include "createMesh.H"
+    #include "setRootCase.H"
+    #include "createTime.H"
+    #include "createMesh.H"
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
     Info << nl;

@@ -42,9 +42,9 @@ int main(int argc, char *argv[])
 {
 
     argList::addOption("dict", "file", "Alternative numpyToFoamDict");
-#include "createMesh.H"
-#include "createTime.H"
-#include "setRootCase.H"
+    #include "setRootCase.H"
+    #include "createTime.H"
+    #include "createMesh.H"
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
     Info << nl;
