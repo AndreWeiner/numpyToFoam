@@ -9,19 +9,33 @@ FoamFile
 {
     format      ascii;
     class       dictionary;
-    object      numpyToFoamDict;
+    object      foamToNumpyDict;
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-dataDir       reconstruction_data;
-fields        (p U);
+
+dataDir       exported_data;
+
+fields
+{
+    names       (p U);
+    dataType    float64;
+}
+
+exportData
+{
+    cellCentre   false;
+    cellVolumes  true;
+    writeTimes   true;
+    dataType     float64;
+}
+
+storageOrder   F;
 
 time
 {
     startTime   0.01;
     endTime     0.5;
-    deltaT      0.01;
+    every       1;
 }
 
-
-
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+// ************************************************************************* //
