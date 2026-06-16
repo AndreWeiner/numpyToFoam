@@ -1,3 +1,11 @@
 test.py
+__pycache__/
+of_cavity/log.*
+of_cavity/processor*
+of_cavity/postProcessing
+of_cavity/constant/polyMesh
+of_cavity/exported_data
+reconstruction_data
+mode_data
 of_cavity_reconstructed
 of_cavity_modes
