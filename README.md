@@ -10,7 +10,7 @@ These snapshots are processed sequentially in time, avoiding the need to store l
 ---
 
 ## Dependencies
-- OpenFOAM v2406
+- OpenFOAM 2112, 2206, 2312, 2412, or 2512
 - A working C++ compiler available in the OpenFOAM environment (e.g. `g++`)
 
 ---
@@ -19,11 +19,30 @@ These snapshots are processed sequentially in time, avoiding the need to store l
 In a working OpenFOAM environment:
 
 ```bash
+./Allwmake
+```
+
+Both utilities will be compiled and made available within your OpenFOAM environment.
+
+To clean both builds:
+
+```bash
+./Allwclean
+```
+
+To compile only `numpyToFoam`:
+
+```bash
 cd src/numpyToFoam
 wmake
 ```
 
-The utility will be compiled and made available within your OpenFOAM environment.
+To clean only `numpyToFoam`:
+
+```bash
+cd src/numpyToFoam
+wclean
+```
 
 ---
 
@@ -134,7 +153,7 @@ The utility can optionally export mesh geometry data (cell centres, cell volumes
 ---
 
 ## Dependencies
-- OpenFOAM v2406
+- OpenFOAM 2112, 2206, 2312, 2412, or 2512
 - A working C++ compiler available in the OpenFOAM environment (e.g. `g++`)
 
 ---
@@ -143,11 +162,30 @@ The utility can optionally export mesh geometry data (cell centres, cell volumes
 In a working OpenFOAM environment:
 
 ```bash
+./Allwmake
+```
+
+Both utilities will be compiled and made available within your OpenFOAM environment.
+
+To clean both builds:
+
+```bash
+./Allwclean
+```
+
+To compile only `foamToNumpy`:
+
+```bash
 cd src/foamToNumpy
 wmake
 ```
 
-The utility will be compiled and made available within your OpenFOAM environment.
+To clean only `foamToNumpy`:
+
+```bash
+cd src/foamToNumpy
+wclean
+```
 
 ---
 
@@ -355,4 +393,3 @@ To monitor a run, go to the **Actions** tab of the repository, select the `numpy
 
 7. **Finite area fields not supported** (`numpyToFoam`, `foamToNumpy`)
    - Only volumetric field types are supported;
-

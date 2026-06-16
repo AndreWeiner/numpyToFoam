@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+cd "${0%/*}" || exit 1
+
+for app in src/foamToNumpy src/numpyToFoam
+do
+    echo "Building ${app}..."
+    (cd "${app}" && wmake)
+done
