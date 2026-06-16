@@ -330,13 +330,13 @@ For each version the following steps are executed in order:
 
 | Step | Description |
 |------|-------------|
-| `foamToNumpy build` | Compiles `foamToNumpy` inside the container |
-| `numpyToFoam build` | Compiles `numpyToFoam` inside the container |
-| `Allrun` | Runs the `icoFoam` cavity simulation |
-| `foamToNumpy run` | Exports simulation fields to `.npy` |
-| `Clean_proc_data` | Removes the original OpenFOAM field data from the processor directories |
-| `numpyToFoam run` | Reconstructs fields from `.npy` |
-| `checksum match` | Compares MD5 checksums of reconstructed vs. original fields |
+| Build foamToNumpy | Compiles `src/foamToNumpy` using `wmake` inside the container |
+| Build numpyToFoam | Compiles `src/numpyToFoam` using `wmake` inside the container |
+| Run simulation | Runs the `./Allrun` script to execute the `icoFoam` cavity simulation |
+| Run foamToNumpy | Runs `foamToNumpy -parallel` to export simulation fields to `.npy` |
+| Clean processor data | Runs the `./Clean_proc_data` script to remove original field files from the processor directories |
+| Run numpyToFoam | Runs `numpyToFoam -parallel` to reconstruct fields from `.npy` |
+| Checksum comparison | Compares MD5 checksums of the reconstructed fields against the original simulation output |
 
 A pass/fail status is printed for each step and version at the end of the run.
 
