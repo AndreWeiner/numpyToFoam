@@ -24,7 +24,7 @@ command -v mpirun >/dev/null 2>&1 || {
 }
 
 echo "Building foamToNumpy and numpyToFoam..."
-(cd .. && ./Allwmake)
+(cd ../.. && ./Allwmake)
 
 echo "Cleaning generated tutorial outputs..."
 ./reset_tutorial.sh
@@ -35,7 +35,7 @@ echo "Running cavity simulation..."
 NPROC="$(find of_cavity -maxdepth 1 -type d -name 'processor*' | wc -l)"
 NPROC="$(printf '%s' "$NPROC" | tr -d '[:space:]')"
 if [ "$NPROC" -eq 0 ]; then
-    echo "No processor directories found in tutorials/of_cavity" >&2
+    echo "No processor directories found in tutorials/pod_time/of_cavity" >&2
     exit 1
 fi
 echo "Detected $NPROC processor directories."
@@ -106,5 +106,5 @@ EOF
 touch of_cavity_modes/of_cavity_modes.foam
 
 echo "Tutorial complete."
-echo "Reconstructed case: tutorials/of_cavity_reconstructed"
-echo "POD modes case:     tutorials/of_cavity_modes"
+echo "Reconstructed case: tutorials/pod_time/of_cavity_reconstructed"
+echo "POD modes case:     tutorials/pod_time/of_cavity_modes"

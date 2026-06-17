@@ -1,15 +1,15 @@
-# Tutorial
+# Time-Resolved POD Tutorial
 
 ## Mode Visualization and Reconstruction Using `foamToNumpy` and `numpyToFoam`
 
 One useful application of these utilities is the visualization of POD modes computed from a snapshot matrix, as well as the visualization of low-order reconstructed fields. In this tutorial, `foamToNumpy` first exports pressure snapshots from an OpenFOAM cavity-flow simulation. A small NumPy script then computes POD modes and a low-rank reconstruction. Finally, `numpyToFoam` writes those arrays back into OpenFOAM format for visualization.
 
-The tutorial is based on the flow-across-cavity case provided in `tutorials/of_cavity`.
+The tutorial is based on the flow-across-cavity case provided in `tutorials/pod_time/of_cavity`.
 
 You can run the complete workflow with:
 
 ```bash
-cd tutorials
+cd tutorials/pod_time
 ./run_tutorial.sh
 ```
 
@@ -21,8 +21,8 @@ To remove generated tutorial data and cases:
 
 The script builds both utilities, runs the cavity simulation, exports pressure and velocity snapshots with `foamToNumpy`, computes the POD data with NumPy, and creates two output cases:
 
-- `tutorials/of_cavity_reconstructed`
-- `tutorials/of_cavity_modes`
+- `tutorials/pod_time/of_cavity_reconstructed`
+- `tutorials/pod_time/of_cavity_modes`
 
 ---
 
@@ -31,7 +31,7 @@ The script builds both utilities, runs the cavity simulation, exports pressure a
 In a working OpenFOAM environment, run:
 
 ```bash
-cd tutorials/of_cavity
+cd tutorials/pod_time/of_cavity
 ./Allrun
 ```
 
@@ -73,7 +73,7 @@ time
 Run `foamToNumpy` in parallel from the case directory:
 
 ```bash
-cd tutorials/of_cavity
+cd tutorials/pod_time/of_cavity
 NPROC="$(find . -maxdepth 1 -type d -name 'processor*' | wc -l)"
 mpirun -np "$NPROC" foamToNumpy -parallel
 ```
@@ -104,12 +104,12 @@ Each `p_proc_i.npy` file contains the pressure snapshots for one processor parti
 
 ## 3. Compute POD Modes and Low-Order Reconstruction
 
-The helper script `tutorials/compute_pod.py` reads the per-processor `foamToNumpy` output, concatenates pressure plus the first two velocity components into a global state matrix, weights each cell by `sqrt(cellVolume)`, computes the singular value decomposition, removes the weighting from the reconstructed fields and modes, and splits the results back into the original processor partitions.
+The helper script `tutorials/pod_time/compute_pod.py` reads the per-processor `foamToNumpy` output, concatenates pressure plus the first two velocity components into a global state matrix, weights each cell by `sqrt(cellVolume)`, computes the singular value decomposition, removes the weighting from the reconstructed fields and modes, and splits the results back into the original processor partitions.
 
 Run:
 
 ```bash
-cd tutorials
+cd tutorials/pod_time
 python3 compute_pod.py \
     --input of_cavity/exported_data \
     --reconstruction-output reconstruction_data \
@@ -166,7 +166,7 @@ For reconstructed fields, each column is one physical time snapshot. For POD mod
 Create a copy of the original case and clean the processor data so that only the mesh and `0/` fields remain:
 
 ```bash
-cd tutorials
+cd tutorials/pod_time
 cp -r of_cavity of_cavity_reconstructed
 cd of_cavity_reconstructed
 ./Clean_proc_data
@@ -209,7 +209,7 @@ touch of_cavity_reconstructed.foam
 The POD modes can be written in the same way by creating a separate case:
 
 ```bash
-cd tutorials
+cd tutorials/pod_time
 cp -r of_cavity of_cavity_modes
 cd of_cavity_modes
 ./Clean_proc_data

@@ -1,0 +1,31 @@
+FoamFile
+{
+    format      ascii;
+    class       dictionary;
+    object      foamToNumpyDict;
+}
+
+dataDir       exported_data;
+
+fields
+{
+    names       (p U);
+    dataType    float64;
+}
+
+exportData
+{
+    cellCentre   false;
+    cellVolumes  true;
+    writeTimes   true;
+    dataType     float64;
+}
+
+storageOrder   F;
+
+time
+{
+    startTime   500;
+    endTime     500;
+    every       1;
+}
