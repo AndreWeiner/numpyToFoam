@@ -1,0 +1,89 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Version:  v2506                                 |
+|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      controlDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+application     simpleFoam;
+
+startFrom       startTime;
+
+startTime       0;
+
+stopAt          endTime;
+
+endTime         500;
+
+deltaT          1;
+
+writeControl    timeStep;
+
+writeInterval   500;
+
+purgeWrite      0;
+
+writeFormat     binary;
+
+writePrecision  6;
+
+writeCompression off;
+
+timeFormat      general;
+
+timePrecision   6;
+
+runTimeModifiable true;
+
+functions
+{
+    forceCoeffs
+    {
+        type            forceCoeffs;
+        libs            (forces);
+        patches         (walls);
+        rho             rhoInf;
+        rhoInf          1;
+        CofR            (0.25 0 0);
+        liftDir         (0.113203213768 0.993571855677 0);
+        dragDir         (0.993571855677 -0.113203213768 0);
+        pitchAxis       (0 0 1);
+        magUInf         21.777687887;
+        lRef            1;
+        Aref            1;
+        writeFields     false;
+        executeControl  writeTime;
+        writeControl    writeTime;
+    }
+
+    surfacePressure
+    {
+        type            surfaces;
+        libs            (sampling);
+        surfaceFormat   raw;
+        interpolationScheme cellPoint;
+        fields          (p);
+        executeControl  writeTime;
+        writeControl    writeTime;
+        surfaces
+        (
+            airfoil
+            {
+                type    patch;
+                patches (walls);
+            }
+        );
+    }
+}
+
+
+// ************************************************************************* //

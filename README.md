@@ -10,7 +10,7 @@ These snapshots are processed sequentially in time, avoiding the need to store l
 ---
 
 ## Dependencies
-- OpenFOAM 2112, 2206, 2312, 2412, or 2512
+- OpenFOAM 2112, 2206, 2312, 2412, or 2512 (tested versions)
 - A working C++ compiler available in the OpenFOAM environment (e.g. `g++`)
 
 ---
@@ -153,7 +153,7 @@ The utility can optionally export mesh geometry data (cell centres, cell volumes
 ---
 
 ## Dependencies
-- OpenFOAM 2112, 2206, 2312, 2412, or 2512
+- OpenFOAM 2112, 2206, 2312, 2412, or 2512 (tested versions)
 - A working C++ compiler available in the OpenFOAM environment (e.g. `g++`)
 
 ---
@@ -324,7 +324,7 @@ Replace `2` with the number of processors used for case decomposition.
 
 A unit test framework is provided to validate both utilities across multiple OpenFOAM versions using Apptainer containers. The pipeline runs an `icoFoam` cavity simulation, exports the results to `.npy` with `foamToNumpy`, reconstructs the fields with `numpyToFoam`, and verifies correctness by comparing MD5 checksums of the reconstructed processor field files against the original simulation output.
 
-**Tested OpenFOAM versions:** 2112, 2206, 2312, 2412, 2512
+**Tested OpenFOAM versions:** 2112, 2206, 2312, 2412, 2512 (tested versions)
 
 For each version the following steps are executed in order:
 

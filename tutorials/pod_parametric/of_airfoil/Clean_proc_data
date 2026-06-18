@@ -1,0 +1,11 @@
+#!/bin/sh
+cd "${0%/*}" || exit
+
+rm -rf exported_data postProcessing
+find . -maxdepth 1 -type d -name 'processor*' | while read -r d; do
+    find "$d" -mindepth 1 -maxdepth 1 \
+        ! -name 0 \
+        ! -name constant \
+        ! -name system \
+        -exec rm -rf {} +
+done

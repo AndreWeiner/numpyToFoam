@@ -1,0 +1,16 @@
+FoamFile
+{
+    format      ascii;
+    class       dictionary;
+    object      numpyToFoamDict;
+}
+
+dataDir       podi_predictions;
+fields        (p U);
+
+time
+{
+    startTime   1;
+    endTime     1;
+    deltaT      1;
+}
