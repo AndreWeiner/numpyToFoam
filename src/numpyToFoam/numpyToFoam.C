@@ -5,7 +5,8 @@
     \\  /    A nd           | www.openfoam.com
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
-    Copyright (C) 2026 AUTHOR,AFFILIATION
+    Copyright (C) 2026 Tanuj Ravi
+    Copyright (C) 2026 Keysight Technologies
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -37,10 +38,64 @@ Description
 #include <iostream>
 #include <string>
 #include <vector>
+
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// True if the meta information corresponds to a supported shape
+bool is_supported_meta(const NpyMeta& meta)
+{
+    if (meta.shape.size() == 3)
+    {
+        // vector-space types
+        return
+        (
+            (meta.shape[1] == 3)
+         || (meta.shape[1] == 6)
+         || (meta.shape[1] == 9)
+        );
+    }
+    else
+    {
+        // scalar types
+        return (meta.shape.size() == 2);
+    }
+}
+
+// Helper function - read snapshot and update/write volume field
+template<class Type>
+void update_from_snapshot
+(
+    const NpyMeta& meta,
+    const label timeIndex,
+    GeometricField<Type, fvPatchField, volMesh>& fld
+)
+{
+    #ifdef FULLDEBUG
+    if (label len = meta.shape[0]; nCells != fld.size())
+    {
+        FatalErrorInFunction
+            << "Size mismatch. snapshot-size=" << len
+            << " field-size=" << fld.size() << " for field "
+            << fld.name() << nl
+            << Foam::exit(FatalError);
+    }
+    #endif
+
+    Field<Type> snapshot;
+    readSnapshotTemplate(meta, timeIndex, snapshot);
+
+    SubList<Type>(fld.primitiveFieldRef(), fld.size()) =
+        SubList<Type>(snapshot, fld.size());
+
+    fld.correctBoundaryConditions();
+    fld.write();
+}
+
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
 int main(int argc, char *argv[])
 {
-
     argList::addOption("dict", "file", "Alternative numpyToFoamDict");
     #include "setRootCase.H"
     #include "createTime.H"
@@ -82,7 +137,7 @@ int main(int argc, char *argv[])
 
     const IOdictionary dict(DictIO);
 
-    wordList fields(dict.get<wordList>("fields"));
+    wordList fieldNames(dict.get<wordList>("fields"));
     const dictionary &timeDict = dict.subDict("time");
     const scalar t_start = timeDict.get<scalar>("startTime");
     const scalar t_end = timeDict.get<scalar>("endTime");
@@ -113,9 +168,8 @@ int main(int argc, char *argv[])
     timeValues[nSteps - 1] = t_end;
 
     // Warn once per field if any of its output files already exist
-    forAll(fields, fieldInd)
+    for (const word& fieldName : fieldNames)
     {
-        const word &fieldName = fields[fieldInd];
         bool fieldExists = false;
 
         forAll(timeValues, timeIndex)
@@ -141,9 +195,8 @@ int main(int argc, char *argv[])
     bool hasRowMajor = false;
     bool hasSinglePrecision = false;
 
-    forAll(fields, fieldInd)
+    for (const word& fieldName : fieldNames)
     {
-        word fieldName = fields[fieldInd];
         word fname = fieldName + "_proc_" + Foam::name(procNo) + ".npy";
 
         fileName fullPath = dataDir / fieldName / fname;
@@ -208,9 +261,8 @@ int main(int argc, char *argv[])
     HashTable<autoPtr<volSymmTensorField>> symmTensorTemplates, symmTensorFields;
     HashTable<autoPtr<volTensorField>> tensorTemplates, tensorFields;
 
-    forAll(fields, fieldInd)
+    for (const word& fieldName : fieldNames)
     {
-        const word fieldName = fields[fieldInd];
         const NpyMeta &meta = metaByField[fieldName];
 
         if (meta.shape.size() == 2)
@@ -354,76 +406,39 @@ int main(int argc, char *argv[])
     autoPtr<functionObjectList> functionsPtr;
 
     forAll(timeValues, timeIndex)
-
     {
         runTime.setTime(timeValues[timeIndex], timeIndex);
 
-        forAll(fields, fieldInd)
+        for (const word& fieldName : fieldNames)
         {
-            const word fieldName = fields[fieldInd];
             const NpyMeta &meta = metaByField[fieldName];
 
             // Now you can read based on meta.shape.size():
             if (meta.shape.size() == 2)
             {
-                scalarField snapshot;
-                readScalarSnapshot(meta, timeIndex, snapshot);
-                volScalarField &scalar_ = scalarFields[fieldName]();
-
-                forAll(scalar_.primitiveFieldRef(), cellI)
-                {
-                    scalar_.primitiveFieldRef()[cellI] = snapshot[cellI];
-                }
-                scalar_.correctBoundaryConditions();
-                scalar_.write();
+                // scalar
+                update_from_snapshot(meta, timeIndex, scalarFields[fieldName]());
             }
-
             else if (meta.shape.size() == 3 && meta.shape[1] == 3)
             {
-                vectorField snapshot;
-                readVectorSnapshot(meta, timeIndex, snapshot);
-                volVectorField &vector_ = vectorFields[fieldName]();
-
-                forAll(vector_.primitiveFieldRef(), cellI)
-                {
-                    vector_.primitiveFieldRef()[cellI] = snapshot[cellI];
-                }
-                vector_.correctBoundaryConditions();
-                vector_.write();
+                // vector
+                update_from_snapshot(meta, timeIndex, vectorFields[fieldName]());
             }
-
             else if (meta.shape.size() == 3 && meta.shape[1] == 6)
             {
-                symmTensorField snapshot;
-                readSymmTensorSnapshot(meta, timeIndex, snapshot);
-                volSymmTensorField &symmtensor_ = symmTensorFields[fieldName]();
-                forAll(symmtensor_.primitiveFieldRef(), cellI)
-                {
-                    symmtensor_.primitiveFieldRef()[cellI] = snapshot[cellI];
-                }
-                symmtensor_.correctBoundaryConditions();
-                symmtensor_.write();
+                // symmTensor
+                update_from_snapshot(meta, timeIndex, symmTensorFields[fieldName]());
             }
-
             else if (meta.shape.size() == 3 && meta.shape[1] == 9)
             {
-                tensorField snapshot;
-                readTensorSnapshot(meta, timeIndex, snapshot);
-                volTensorField &tensor_ = tensorFields[fieldName]();
-
-                forAll(tensor_.primitiveFieldRef(), cellI)
-                {
-                    tensor_.primitiveFieldRef()[cellI] = snapshot[cellI];
-                }
-
-                tensor_.correctBoundaryConditions();
-                tensor_.write();
+                // tensor
+                update_from_snapshot(meta, timeIndex, tensorFields[fieldName]());
             }
-
             else
             {
-                FatalErrorInFunction << "Unsupported dims " << meta.shape.size()
-                                     << " for " << meta.file << exit(FatalError);
+                FatalErrorInFunction
+                    << "Unsupported dims " << meta.shape.size()
+                    << " for " << meta.file << exit(FatalError);
             }
         }
         if (Pstream::master())
