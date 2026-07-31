@@ -5,7 +5,7 @@
     \\  /    A nd           | www.openfoam.com
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
-    Copyright (C) 2026 AUTHOR,AFFILIATION
+    Copyright (C) 2026 Tanuj Ravi
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -34,6 +34,7 @@ Description
 #include "IOdictionary.H"
 #include "argList.H"
 #include "writeData.H"
+
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 int main(int argc, char *argv[])
@@ -85,7 +86,7 @@ int main(int argc, char *argv[])
 
     const IOdictionary dict(DictIO);
 
-    wordList fields;
+    wordList fieldNames;
 
     word dataTypeWord_field = "float64";
     npyType dtype_field = parseNpyType(dataTypeWord_field);
@@ -93,7 +94,7 @@ int main(int argc, char *argv[])
     if (dict.found("fields"))
     {
         const dictionary &fieldDict = dict.subDict("fields");
-        fields = fieldDict.get<wordList>("names");
+        fieldNames = fieldDict.get<wordList>("names");
         dataTypeWord_field = fieldDict.getOrDefault<word>("dataType", "float64");
         dtype_field = parseNpyType(dataTypeWord_field);
     }
@@ -113,27 +114,20 @@ int main(int argc, char *argv[])
     if (dict.found("exportData"))
     {
         const dictionary &exportDict = dict.subDict("exportData");
-        writeCellCentre = exportDict.getOrDefault<bool>("cellCentre", false);
-        writeCellVolumes = exportDict.getOrDefault<bool>("cellVolumes", false);
-        writeWriteTimes = exportDict.getOrDefault<bool>("writeTimes", false);
-        dataTypeWord_export = exportDict.getOrDefault<word>("dataType", "float64");
+        exportDict.readIfPresent("cellCentre", writeCellCentre);
+        exportDict.readIfPresent("cellVolumes", writeCellVolumes);
+        exportDict.readIfPresent("writeTimes", writeWriteTimes);
+        exportDict.readIfPresent("dataType", dataTypeWord_export);
         dtype_export = parseNpyType(dataTypeWord_export);
     }
 
     const word storageOrderWord = dict.getOrDefault<word>("storageOrder", "C");
     const bool fortranOrder = parseFortranOrder(storageOrderWord);
-    fileName caseDir = runTime.path();     // .../case/processorN
-    fileName rootCaseDir = caseDir.path(); // .../case
-    fileName dataSubDir = dict.getOrDefault<fileName>("dataDir", "data");
-    fileName dataDir;
 
-    if (dataSubDir.isAbsolute())
+    fileName dataDir(dict.getOrDefault<fileName>("dataDir", "data"));
+    if (!dataDir.isAbsolute())
     {
-        dataDir = dataSubDir;
-    }
-    else
-    {
-        dataDir = rootCaseDir / dataSubDir;
+        dataDir = runTime.rootPath() / dataDir;
     }
 
     if (Pstream::master() && !isDir(dataDir))
@@ -144,55 +138,60 @@ int main(int argc, char *argv[])
     instantList allTimes = runTime.times();
     instantList selectedTimes;
 
-    label count = 0;
-    if (every <= 0)
     {
-        FatalErrorInFunction
-            << "'every' must be greater than 0" << nl
-            << exit(FatalError);
-    }
+        DynamicList<label> timeIndices(allTimes.size());
 
-    forAll(allTimes, i)
-    {
-        const instant &t = allTimes[i];
-
-        // Skip constant
-        if (t.name() == runTime.constant())
+        if (every <= 0)
         {
-            continue;
+            FatalErrorInFunction
+                << "'every' must be greater than 0" << nl
+                << exit(FatalError);
         }
 
-        const scalar timeValue = t.value();
-
-        // Keep only times inside [startTime, endTime]
-        if (timeValue >= t_start && timeValue <= t_end)
+        label count = 0;
+        forAll(allTimes, i)
         {
-            if (count % every == 0)
+            const auto& t = allTimes[i];
+
+            // Skip constant
+            if (t.name() == runTime.constant())
             {
-                selectedTimes.append(t);
+                continue;
             }
-            ++count;
-        }
-    }
 
-    if (selectedTimes.empty())
-    {
-        FatalErrorInFunction
-            << "No times selected in range [" << t_start
-            << ", " << t_end << "]"
-            << exit(FatalError);
+            const scalar timeValue = t.value();
+
+            // Keep only times inside [startTime, endTime]
+            if (timeValue >= t_start && timeValue <= t_end)
+            {
+                if (count % every == 0)
+                {
+                    timeIndices.append(i);
+                }
+                ++count;
+            }
+        }
+
+        selectedTimes = instantList(allTimes, timeIndices);
+
+        if (selectedTimes.empty())
+        {
+            FatalErrorInFunction
+                << "No times selected in range [" << t_start
+                << ", " << t_end << "]"
+                << exit(FatalError);
+        }
     }
 
     runTime.setTime(selectedTimes[0], 0);
 
-    // List<fieldMeta> metadata(fields.size());
     DynamicList<fieldMeta> metadata;
 
     Info << "Inspecting fields at initial selected time "
          << runTime.timeName() << nl;
-    forAll(fields, i)
+
+    for (const word& fieldName : fieldNames)
     {
-        const word &fieldName = fields[i];
         const fileName fieldDir = dataDir / fieldName;
 
         bool skipField = false;
@@ -580,5 +579,11 @@ int main(int argc, char *argv[])
             writer.flush();
         }
     }
+
+    Info<< "End\n" << endl;
+
+    return 0;
 }
+
+
 // ************************************************************************* //
