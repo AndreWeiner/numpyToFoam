@@ -132,9 +132,9 @@ static inline double readAtIndex(std::ifstream &f, const bool is_f8,
 
 // Templated read of scalar or vector-space fields
 template<class Type>
-static void readSnapshotTemplate
+static void readSnapshot
 (
-    const NpyMeta &meta,
+    const NpyMeta& meta,
     const label timeIndex,
     Field<Type>& snapshot
 )
@@ -255,56 +255,15 @@ static void readSnapshotTemplate
 
 // Templated read of scalar or vector-space fields
 template<class Type>
-static tmp<Field<Type>> readSnapshotTemplate
+static tmp<Field<Type>> readSnapshot
 (
-    const NpyMeta &meta,
+    const NpyMeta& meta,
     const label timeIndex
 )
 {
   auto tresult = tmp<Field<Type>>::New();
-  readSnapshotTemplate(meta, timeIndex, tresult.ref());
+  readSnapshot(meta, timeIndex, tresult.ref());
   return tresult;
-}
-
-
-static void readScalarSnapshot
-(
-    const NpyMeta& meta,
-    const label timeIndex,
-    Field<scalar>& snapshot
-)
-{
-    readSnapshotTemplate(meta, timeIndex, snapshot);
-}
-
-static void readVectorSnapshot
-(
-    const NpyMeta& meta,
-    const label timeIndex,
-    Field<vector>& snapshot
-)
-{
-    readSnapshotTemplate(meta, timeIndex, snapshot);
-}
-
-static void readSymmTensorSnapshot
-(
-    const NpyMeta& meta,
-    const label timeIndex,
-    Field<symmTensor>& snapshot
-)
-{
-    readSnapshotTemplate(meta, timeIndex, snapshot);
-}
-
-static void readTensorSnapshot
-(
-    const NpyMeta& meta,
-    const label timeIndex,
-    Field<tensor>& snapshot
-)
-{
-    readSnapshotTemplate(meta, timeIndex, snapshot);
 }
 
 

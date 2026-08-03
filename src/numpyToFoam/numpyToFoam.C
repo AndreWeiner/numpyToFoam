@@ -49,9 +49,9 @@ bool is_supported_meta(const NpyMeta& meta)
         // vector-space types
         return
         (
-            (meta.shape[1] == 3)
-         || (meta.shape[1] == 6)
-         || (meta.shape[1] == 9)
+            (meta.shape[1] == pTraits<vector>::nComponents)
+         || (meta.shape[1] == pTraits<symmTensor>::nComponents)
+         || (meta.shape[1] == pTraits<tensor>::nComponents)
         );
     }
     else
@@ -60,6 +60,7 @@ bool is_supported_meta(const NpyMeta& meta)
         return (meta.shape.size() == 2);
     }
 }
+
 
 // Helper function - read snapshot and update/write volume field
 template<class Type>
@@ -82,7 +83,7 @@ void update_from_snapshot
     #endif
 
     Field<Type> snapshot;
-    readSnapshotTemplate(meta, timeIndex, snapshot);
+    readSnapshot(meta, timeIndex, snapshot);
 
     SubList<Type>(fld.primitiveFieldRef(), fld.size()) =
         SubList<Type>(snapshot, fld.size());
@@ -90,6 +91,7 @@ void update_from_snapshot
     fld.correctBoundaryConditions();
     fld.write();
 }
+
 
 // Helper function - read or create field
 template<class GeoField>
@@ -166,6 +168,7 @@ void init_field
     );
 }
 
+
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 int main(int argc, char *argv[])
@@ -180,43 +183,20 @@ int main(int argc, char *argv[])
     runTime.printExecutionTime(Info);
     const word dictName("numpyToFoamDict");
 
-    fileName dictPath;
+    // Dictionary default location is 'system'
+    #include "setSystemRunTimeDictionaryIO.H"
 
-    if (args.readIfPresent("dict", dictPath))
-    {
-        // Dictionary specified on the command-line ...
+    Info<< "Reading numpyToFoam settings from "
+        << dictIO.objectRelPath() << endl;
 
-        if (isDir(dictPath))
-        {
-            dictPath /= dictName;
-        }
-    }
-    else
-    {
-        // Assume dictionary is to be found in the system directory
-
-        dictPath = runTime.system() / dictName;
-    }
-
-    IOobject DictIO(dictPath, runTime, IOobject::MUST_READ, IOobject::NO_WRITE,
-                    false);
-
-    if (!DictIO.typeHeaderOk<IOdictionary>(true))
-    {
-        FatalErrorInFunction << DictIO.objectPath() << nl << exit(FatalError);
-    }
-
-    Info << "Reading numpyToFoam settings from " << DictIO.objectRelPath()
-         << endl;
-
-    const IOdictionary dict(DictIO);
+    const IOdictionary dict(dictIO);
 
     wordList fieldNames(dict.get<wordList>("fields"));
     const dictionary &timeDict = dict.subDict("time");
     const scalar t_start = timeDict.get<scalar>("startTime");
     const scalar t_end = timeDict.get<scalar>("endTime");
     const scalar dt = timeDict.get<scalar>("deltaT");
-    label procNo = Pstream::myProcNo();
+    const auto procNo = UPstream::myProcNo();
 
     fileName dataDir(dict.getOrDefault<fileName>("dataDir", "data"));
     if (!dataDir.isAbsolute())
@@ -262,11 +242,17 @@ int main(int argc, char *argv[])
     bool hasRowMajor = false;
     bool hasSinglePrecision = false;
 
-    for (const word& fieldName : fieldNames)
-    {
-        word fname = fieldName + "_proc_" + Foam::name(procNo) + ".npy";
+    label nFields = 0;
 
-        fileName fullPath = dataDir / fieldName / fname;
+    forAll(fieldNames, fieldi)
+    {
+        const word& fieldName = fieldNames[fieldi];
+
+        const fileName fullPath
+        (
+            dataDir / fieldName
+          / (fieldName + "_proc_" + Foam::name(procNo) + ".npy")
+        );
 
         if (!isFile(fullPath))
         {
@@ -275,52 +261,68 @@ int main(int argc, char *argv[])
 
         NpyMeta meta = readNpyMeta(fullPath);
 
-        if (!meta.fortranOrder)
-        {
-            hasRowMajor = true;
-        }
-        if (!meta.is_f8)
-        {
-            hasSinglePrecision = true;
-        }
-
-        // TBD: filter/remove unsupported fields here?
-
-        metaByField.insert(fieldName, meta);
-
         // ---- PRINT INFO ----
         Info << "Rank " << Pstream::myProcNo() << " | Loaded file: " << meta.file
              << " | Shape: (";
 
         for (std::size_t d = 0; d < meta.shape.size(); ++d)
         {
+            if (d) Info<< " x ";
             Info << meta.shape[d];
-            if (d + 1 < meta.shape.size())
-            {
-                Info << " x ";
-            }
         }
 
         Info << ")" << " | Type: " << (meta.is_f8 ? "float64" : "float32") << nl;
+
+        if (is_supported_meta(meta))
+        {
+            // Supported field type
+            metaByField.insert(fieldName, meta);
+
+            if (nFields != fieldi)
+            {
+                fieldNames[nFields] = std::move(fieldNames[fieldi]);
+            }
+            ++nFields;
+
+            if (!meta.fortranOrder)
+            {
+                hasRowMajor = true;
+            }
+            if (!meta.is_f8)
+            {
+                hasSinglePrecision = true;
+            }
+        }
+        else
+        {
+            // Unsupported field type
+            Info<< "WARNING: ignoring unsupported shape, field:" << fieldName << endl;
+        }
     }
 
-    Info << nl;
+    // Resize (after culling any unsupported fields)
+    fieldNames.resize(nFields);
 
-    if (hasRowMajor && Pstream::master())
+    if (fieldNames.empty())
     {
-        WarningInFunction << "Detected row-major (C-order) numpy arrays." << nl
-                          << "    Reading snapshots will be inefficient due to "
-                             "non-contiguous access."
-                          << nl
-                          << "    Consider saving data in column-major "
-                             "(Fortran-order) for better performance."
-                          << nl << endl;
+        FatalErrorInFunction
+            << "No (supported) fields to read. Stopping" << nl
+            << exit(FatalError);
     }
-    if (hasSinglePrecision && Pstream::master())
+
+    if (hasRowMajor)
+    {
+        WarningInFunction
+            << "Detected row-major (C-order) numpy arrays." << nl
+            << "    Reading snapshots will be inefficient (non-contiguous access)." << nl
+            << "    Consider saving data in column-major (Fortran-order) "
+               "for better performance." << nl << endl;
+    }
+    if (hasSinglePrecision)
     {
         WarningInFunction
             << "Fields stored as float32 (single precision)." << nl
-            << "    It will be converted to OpenFOAM double precision during write."
+            << "    It will be converted to OpenFOAM precision during write."
             << nl << endl;
     }
     runTime.setTime(timeValues[0], 0);
@@ -334,27 +336,49 @@ int main(int argc, char *argv[])
     {
         const NpyMeta &meta = metaByField[fieldName];
 
+        bool unhandled_dims = false;
+
         if (meta.shape.size() == 2)
         {
             // scalar
             init_field(fieldName, runTime, mesh, scalarFields);
         }
-        else if (meta.shape.size() == 3 && meta.shape[1] == 3)
+        else if (meta.shape.size() == 3)
         {
-            // vector
-            init_field(fieldName, runTime, mesh, vectorFields);
-        }
-        else if (meta.shape.size() == 3 && meta.shape[1] == 6)
-        {
-            // symmTensor
-            init_field(fieldName, runTime, mesh, symmTensorFields);
-        }
-        else if (meta.shape.size() == 3 && meta.shape[1] == 9)
-        {
-            // tensor
-            init_field(fieldName, runTime, mesh, tensorFields);
+            // vector-space types
+            switch (meta.shape[1])
+            {
+                case pTraits<vector>::nComponents :
+                {
+                    init_field(fieldName, runTime, mesh, vectorFields);
+                    break;
+                }
+
+                case pTraits<symmTensor>::nComponents :
+                {
+                    init_field(fieldName, runTime, mesh, symmTensorFields);
+                    break;
+                }
+
+                case pTraits<tensor>::nComponents :
+                {
+                    init_field(fieldName, runTime, mesh, tensorFields);
+                    break;
+                }
+
+                default :
+                {
+                    unhandled_dims = true;
+                    break;
+                }
+            }
         }
         else
+        {
+            unhandled_dims = true;
+        }
+
+        if (unhandled_dims)
         {
             WarningInFunction
                 << "Unhandled dims " << meta.shape.size()
@@ -373,28 +397,70 @@ int main(int argc, char *argv[])
         {
             const NpyMeta &meta = metaByField[fieldName];
 
+            bool unhandled_dims = false;
+
             // Now you can read based on meta.shape.size():
             if (meta.shape.size() == 2)
             {
                 // scalar
-                update_from_snapshot(meta, timeIndex, *(scalarFields[fieldName]));
+                update_from_snapshot
+                (
+                    meta,
+                    timeIndex,
+                    *(scalarFields[fieldName])
+                );
             }
-            else if (meta.shape.size() == 3 && meta.shape[1] == 3)
+            else if (meta.shape.size() == 3)
             {
-                // vector
-                update_from_snapshot(meta, timeIndex, *(vectorFields[fieldName]));
-            }
-            else if (meta.shape.size() == 3 && meta.shape[1] == 6)
-            {
-                // symmTensor
-                update_from_snapshot(meta, timeIndex, *(symmTensorFields[fieldName]));
-            }
-            else if (meta.shape.size() == 3 && meta.shape[1] == 9)
-            {
-                // tensor
-                update_from_snapshot(meta, timeIndex, *(tensorFields[fieldName]));
+                // vector-space types
+                switch (meta.shape[1])
+                {
+                    case pTraits<vector>::nComponents :
+                    {
+                        update_from_snapshot
+                        (
+                            meta,
+                            timeIndex,
+                            *(vectorFields[fieldName])
+                        );
+                        break;
+                    }
+
+                    case pTraits<symmTensor>::nComponents :
+                    {
+                        update_from_snapshot
+                        (
+                            meta,
+                            timeIndex,
+                            *(symmTensorFields[fieldName])
+                        );
+                        break;
+                    }
+
+                    case pTraits<tensor>::nComponents :
+                    {
+                        update_from_snapshot
+                        (
+                            meta,
+                            timeIndex,
+                            *(tensorFields[fieldName])
+                        );
+                        break;
+                    }
+
+                    default :
+                    {
+                        unhandled_dims = true;
+                        break;
+                    }
+                }
             }
             else
+            {
+                unhandled_dims = true;
+            }
+
+            if (unhandled_dims)
             {
                 FatalErrorInFunction
                     << "Unsupported dims " << meta.shape.size()
@@ -402,7 +468,8 @@ int main(int argc, char *argv[])
             }
         }
 
-        Info<< "Finished writing fields for time = " << runTime.timeName() << endl;
+        Info<< "Finished writing fields for time = "
+            << runTime.timeName() << endl;
     }
 
     Info<< "End\n" << endl;
