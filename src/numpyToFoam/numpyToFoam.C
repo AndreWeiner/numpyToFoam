@@ -5,7 +5,8 @@
     \\  /    A nd           | www.openfoam.com
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
-    Copyright (C) 2026 AUTHOR,AFFILIATION
+    Copyright (C) 2026 Tanuj Ravi
+    Copyright (C) 2026 Keysight Technologies
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -33,14 +34,145 @@ Description
 #include "OSspecific.H"
 #include "fvCFD.H"
 #include "readData.H"
+
 #include <fstream>
-#include <iostream>
 #include <string>
 #include <vector>
+
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// True if the meta information corresponds to a supported shape
+bool is_supported_meta(const NpyMeta& meta)
+{
+    if (meta.shape.size() == 3)
+    {
+        // vector-space types
+        return
+        (
+            (meta.shape[1] == pTraits<vector>::nComponents)
+         || (meta.shape[1] == pTraits<symmTensor>::nComponents)
+         || (meta.shape[1] == pTraits<tensor>::nComponents)
+        );
+    }
+    else
+    {
+        // scalar types
+        return (meta.shape.size() == 2);
+    }
+}
+
+
+// Helper function - read snapshot and update/write volume field
+template<class Type>
+void update_from_snapshot
+(
+    const NpyMeta& meta,
+    const label timeIndex,
+    GeometricField<Type, fvPatchField, volMesh>& fld
+)
+{
+    #ifdef FULLDEBUG
+    if (label len = meta.shape[0]; nCells != fld.size())
+    {
+        FatalErrorInFunction
+            << "Size mismatch. snapshot-size=" << len
+            << " field-size=" << fld.size() << " for field "
+            << fld.name() << nl
+            << Foam::exit(FatalError);
+    }
+    #endif
+
+    Field<Type> snapshot;
+    readSnapshot(meta, timeIndex, snapshot);
+
+    SubList<Type>(fld.primitiveFieldRef(), fld.size()) =
+        SubList<Type>(snapshot, fld.size());
+
+    fld.correctBoundaryConditions();
+    fld.write();
+}
+
+
+// Helper function - read or create field
+template<class GeoField>
+void init_field
+(
+    const word& fieldName,
+    const Time& runTime,
+    const fvMesh& mesh,
+    HashPtrTable<GeoField>& fields
+)
+{
+    using value_type = typename GeoField::value_type;
+
+    fileName field0Path = runTime.path() / "0" / fieldName;
+
+    autoPtr<GeoField> tmpl;
+
+    if (Foam::isFile(field0Path))
+    {
+        Info<< "Reading existing 0/" << fieldName
+            << " [" << pTraits<value_type>::typeName << "]" << nl;
+
+        tmpl = autoPtr<GeoField>::New
+        (
+            IOobject
+            (
+                fieldName,
+                "0",
+                mesh,
+                IOobject::MUST_READ,
+                IOobject::NO_WRITE,
+                false  // no register
+            ),
+            mesh
+        );
+    }
+    else
+    {
+        Info<< "Creating field " << fieldName << " (no 0/ file)"
+            << " [" << pTraits<value_type>::typeName << "]" << nl;
+
+        tmpl = autoPtr<GeoField>::New
+        (
+            IOobject
+            (
+                fieldName,
+                runTime.timeName(),
+                mesh,
+                IOobject::NO_READ,
+                IOobject::NO_WRITE,
+                false  // no register
+            ),
+            mesh,
+            dimensioned<value_type>(Zero)
+        );
+    }
+
+    fields.insert
+    (
+        fieldName,
+        autoPtr<GeoField>::New
+        (
+            IOobject
+            (
+                fieldName,
+                runTime.timeName(),
+                mesh,
+                IOobject::NO_READ,
+                IOobject::NO_WRITE,
+                true  // Register
+            ),
+            tmpl()
+        )
+    );
+}
+
+
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
 int main(int argc, char *argv[])
 {
-
     argList::addOption("dict", "file", "Alternative numpyToFoamDict");
     #include "setRootCase.H"
     #include "createTime.H"
@@ -51,58 +183,28 @@ int main(int argc, char *argv[])
     runTime.printExecutionTime(Info);
     const word dictName("numpyToFoamDict");
 
-    fileName dictPath;
+    // Dictionary default location is 'system'
+    #include "setSystemRunTimeDictionaryIO.H"
 
-    if (args.readIfPresent("dict", dictPath))
-    {
-        // Dictionary specified on the command-line ...
+    Info<< "Reading numpyToFoam settings from "
+        << dictIO.objectRelPath() << endl;
 
-        if (isDir(dictPath))
-        {
-            dictPath /= dictName;
-        }
-    }
-    else
-    {
-        // Assume dictionary is to be found in the system directory
+    const IOdictionary dict(dictIO);
 
-        dictPath = runTime.system() / dictName;
-    }
-
-    IOobject DictIO(dictPath, runTime, IOobject::MUST_READ, IOobject::NO_WRITE,
-                    false);
-
-    if (!DictIO.typeHeaderOk<IOdictionary>(true))
-    {
-        FatalErrorInFunction << DictIO.objectPath() << nl << exit(FatalError);
-    }
-
-    Info << "Reading numpyToFoam settings from " << DictIO.objectRelPath()
-         << endl;
-
-    const IOdictionary dict(DictIO);
-
-    wordList fields(dict.get<wordList>("fields"));
+    wordList fieldNames(dict.get<wordList>("fields"));
     const dictionary &timeDict = dict.subDict("time");
     const scalar t_start = timeDict.get<scalar>("startTime");
     const scalar t_end = timeDict.get<scalar>("endTime");
     const scalar dt = timeDict.get<scalar>("deltaT");
-    label procNo = Pstream::myProcNo();
-    fileName caseDir = runTime.path();     // .../case/processorN
-    fileName rootCaseDir = caseDir.path(); // .../case
-    fileName dataSubDir = dict.lookupOrDefault<fileName>("dataDir", "data");
-    fileName dataDir;
+    const auto procNo = UPstream::myProcNo();
 
-    if (dataSubDir.isAbsolute())
+    fileName dataDir(dict.getOrDefault<fileName>("dataDir", "data"));
+    if (!dataDir.isAbsolute())
     {
-        dataDir = dataSubDir;
-    }
-    else
-    {
-        dataDir = rootCaseDir / dataSubDir;
+        dataDir = runTime.rootPath() / dataDir;
     }
 
-    fileNameList files = readDir(dataDir, fileName::FILE);
+    fileNameList files = Foam::readDir(dataDir, fileName::FILE);
 
     label nSteps = floor((t_end - t_start) / dt + 0.5) + 1;
     scalarList timeValues(nSteps);
@@ -113,9 +215,8 @@ int main(int argc, char *argv[])
     timeValues[nSteps - 1] = t_end;
 
     // Warn once per field if any of its output files already exist
-    forAll(fields, fieldInd)
+    for (const word& fieldName : fieldNames)
     {
-        const word &fieldName = fields[fieldInd];
         bool fieldExists = false;
 
         forAll(timeValues, timeIndex)
@@ -141,12 +242,17 @@ int main(int argc, char *argv[])
     bool hasRowMajor = false;
     bool hasSinglePrecision = false;
 
-    forAll(fields, fieldInd)
-    {
-        word fieldName = fields[fieldInd];
-        word fname = fieldName + "_proc_" + Foam::name(procNo) + ".npy";
+    label nFields = 0;
 
-        fileName fullPath = dataDir / fieldName / fname;
+    forAll(fieldNames, fieldi)
+    {
+        const word& fieldName = fieldNames[fieldi];
+
+        const fileName fullPath
+        (
+            dataDir / fieldName
+          / (fieldName + "_proc_" + Foam::name(procNo) + ".npy")
+        );
 
         if (!isFile(fullPath))
         {
@@ -155,285 +261,221 @@ int main(int argc, char *argv[])
 
         NpyMeta meta = readNpyMeta(fullPath);
 
-        if (!meta.fortranOrder)
-        {
-            hasRowMajor = true;
-        }
-        if (!meta.is_f8)
-        {
-            hasSinglePrecision = true;
-        }
-
-        metaByField.insert(fieldName, meta);
-
         // ---- PRINT INFO ----
         Info << "Rank " << Pstream::myProcNo() << " | Loaded file: " << meta.file
              << " | Shape: (";
 
         for (std::size_t d = 0; d < meta.shape.size(); ++d)
         {
+            if (d) Info<< " x ";
             Info << meta.shape[d];
-            if (d + 1 < meta.shape.size())
-            {
-                Info << " x ";
-            }
         }
 
         Info << ")" << " | Type: " << (meta.is_f8 ? "float64" : "float32") << nl;
+
+        if (is_supported_meta(meta))
+        {
+            // Supported field type
+            metaByField.insert(fieldName, meta);
+
+            if (nFields != fieldi)
+            {
+                fieldNames[nFields] = std::move(fieldNames[fieldi]);
+            }
+            ++nFields;
+
+            if (!meta.fortranOrder)
+            {
+                hasRowMajor = true;
+            }
+            if (!meta.is_f8)
+            {
+                hasSinglePrecision = true;
+            }
+        }
+        else
+        {
+            // Unsupported field type
+            Info<< "WARNING: ignoring unsupported shape, field:" << fieldName << endl;
+        }
     }
 
-    Info << nl;
+    // Resize (after culling any unsupported fields)
+    fieldNames.resize(nFields);
 
-    if (hasRowMajor && Pstream::master())
+    if (fieldNames.empty())
     {
-        WarningInFunction << "Detected row-major (C-order) numpy arrays." << nl
-                          << "    Reading snapshots will be inefficient due to "
-                             "non-contiguous access."
-                          << nl
-                          << "    Consider saving data in column-major "
-                             "(Fortran-order) for better performance."
-                          << nl << endl;
+        FatalErrorInFunction
+            << "No (supported) fields to read. Stopping" << nl
+            << exit(FatalError);
     }
-    if (hasSinglePrecision && Pstream::master())
+
+    if (hasRowMajor)
+    {
+        WarningInFunction
+            << "Detected row-major (C-order) numpy arrays." << nl
+            << "    Reading snapshots will be inefficient (non-contiguous access)." << nl
+            << "    Consider saving data in column-major (Fortran-order) "
+               "for better performance." << nl << endl;
+    }
+    if (hasSinglePrecision)
     {
         WarningInFunction
             << "Fields stored as float32 (single precision)." << nl
-            << "    It will be converted to OpenFOAM double precision during write."
+            << "    It will be converted to OpenFOAM precision during write."
             << nl << endl;
     }
     runTime.setTime(timeValues[0], 0);
 
-    HashTable<autoPtr<volScalarField>> scalarTemplates, scalarFields;
-    HashTable<autoPtr<volVectorField>> vectorTemplates, vectorFields;
-    HashTable<autoPtr<volSymmTensorField>> symmTensorTemplates, symmTensorFields;
-    HashTable<autoPtr<volTensorField>> tensorTemplates, tensorFields;
+    HashPtrTable<volScalarField> scalarFields;
+    HashPtrTable<volVectorField> vectorFields;
+    HashPtrTable<volSymmTensorField> symmTensorFields;
+    HashPtrTable<volTensorField> tensorFields;
 
-    forAll(fields, fieldInd)
+    for (const word& fieldName : fieldNames)
     {
-        const word fieldName = fields[fieldInd];
         const NpyMeta &meta = metaByField[fieldName];
+
+        bool unhandled_dims = false;
 
         if (meta.shape.size() == 2)
         {
-            autoPtr<volScalarField> tmpl;
-
-            fileName field0Path = runTime.path() / "0" / fieldName;
-
-            if (isFile(field0Path))
+            // scalar
+            init_field(fieldName, runTime, mesh, scalarFields);
+        }
+        else if (meta.shape.size() == 3)
+        {
+            // vector-space types
+            switch (meta.shape[1])
             {
-                Info << "Reading existing 0/" << fieldName << nl;
+                case pTraits<vector>::nComponents :
+                {
+                    init_field(fieldName, runTime, mesh, vectorFields);
+                    break;
+                }
 
-                tmpl.reset(new volScalarField(IOobject(fieldName, "0", mesh,
-                                                       IOobject::MUST_READ,
-                                                       IOobject::NO_WRITE, false),
-                                              mesh));
+                case pTraits<symmTensor>::nComponents :
+                {
+                    init_field(fieldName, runTime, mesh, symmTensorFields);
+                    break;
+                }
+
+                case pTraits<tensor>::nComponents :
+                {
+                    init_field(fieldName, runTime, mesh, tensorFields);
+                    break;
+                }
+
+                default :
+                {
+                    unhandled_dims = true;
+                    break;
+                }
             }
-            else
-            {
-                Info << "Creating field " << fieldName << " (no 0/ file)" << nl;
-
-                tmpl.reset(new volScalarField(
-                    IOobject(fieldName, runTime.timeName(), mesh, IOobject::NO_READ,
-                             IOobject::NO_WRITE, false),
-                    mesh, dimensionedScalar(fieldName, dimless, 0.0)));
-            }
-
-            scalarTemplates.insert(fieldName, tmpl);
-
-            scalarFields.insert(
-                fieldName, autoPtr<volScalarField>(new volScalarField(
-                               IOobject(fieldName, runTime.timeName(), mesh,
-                                        IOobject::NO_READ, IOobject::NO_WRITE, true),
-                               scalarTemplates[fieldName]())));
+        }
+        else
+        {
+            unhandled_dims = true;
         }
 
-        else if (meta.shape.size() == 3 && meta.shape[1] == 3)
+        if (unhandled_dims)
         {
-            autoPtr<volVectorField> tmpl;
-
-            fileName field0Path = runTime.path() / "0" / fieldName;
-
-            if (isFile(field0Path))
-            {
-                Info << "Reading existing 0/" << fieldName << nl;
-
-                tmpl.reset(new volVectorField(IOobject(fieldName, "0", mesh,
-                                                       IOobject::MUST_READ,
-                                                       IOobject::NO_WRITE, false),
-                                              mesh));
-            }
-            else
-            {
-                Info << "Creating vector field " << fieldName << " (no 0/ file)" << nl;
-
-                tmpl.reset(new volVectorField(
-                    IOobject(fieldName, runTime.timeName(), mesh, IOobject::NO_READ,
-                             IOobject::NO_WRITE, false),
-                    mesh, dimensionedVector(fieldName, dimless, vector::zero)));
-            }
-
-            vectorTemplates.insert(fieldName, tmpl);
-
-            vectorFields.insert(
-                fieldName, autoPtr<volVectorField>(new volVectorField(
-                               IOobject(fieldName, runTime.timeName(), mesh,
-                                        IOobject::NO_READ, IOobject::NO_WRITE, true),
-                               vectorTemplates[fieldName]())));
-        }
-
-        else if (meta.shape.size() == 3 && meta.shape[1] == 6)
-        {
-            autoPtr<volSymmTensorField> tmpl;
-
-            fileName field0Path = runTime.path() / "0" / fieldName;
-
-            if (isFile(field0Path))
-            {
-                Info << "Reading existing 0/" << fieldName << nl;
-
-                tmpl.reset(new volSymmTensorField(IOobject(fieldName, "0", mesh,
-                                                           IOobject::MUST_READ,
-                                                           IOobject::NO_WRITE, false),
-                                                  mesh));
-            }
-            else
-            {
-                Info << "Creating symmTensor field " << fieldName << " (no 0/ file)"
-                     << nl;
-
-                tmpl.reset(new volSymmTensorField(
-                    IOobject(fieldName, runTime.timeName(), mesh, IOobject::NO_READ,
-                             IOobject::NO_WRITE, false),
-                    mesh, dimensionedSymmTensor(fieldName, dimless, symmTensor::zero)));
-            }
-
-            symmTensorTemplates.insert(fieldName, tmpl);
-
-            symmTensorFields.insert(
-                fieldName, autoPtr<volSymmTensorField>(new volSymmTensorField(
-                               IOobject(fieldName, runTime.timeName(), mesh,
-                                        IOobject::NO_READ, IOobject::NO_WRITE, true),
-                               symmTensorTemplates[fieldName]())));
-        }
-        else if (meta.shape.size() == 3 && meta.shape[1] == 9)
-        {
-            autoPtr<volTensorField> tmpl;
-
-            fileName field0Path = runTime.path() / "0" / fieldName;
-
-            if (isFile(field0Path))
-            {
-                Info << "Reading existing 0/" << fieldName << nl;
-
-                tmpl.reset(new volTensorField(IOobject(fieldName, "0", mesh,
-                                                       IOobject::MUST_READ,
-                                                       IOobject::NO_WRITE, false),
-                                              mesh));
-            }
-            else
-            {
-                Info << "Creating tensor field " << fieldName << " (no 0/ file)" << nl;
-
-                tmpl.reset(new volTensorField(
-                    IOobject(fieldName, runTime.timeName(), mesh, IOobject::NO_READ,
-                             IOobject::NO_WRITE, false),
-                    mesh, dimensionedTensor(fieldName, dimless, tensor::zero)));
-            }
-
-            tensorTemplates.insert(fieldName, tmpl);
-
-            tensorFields.insert(
-                fieldName, autoPtr<volTensorField>(new volTensorField(
-                               IOobject(fieldName, runTime.timeName(), mesh,
-                                        IOobject::NO_READ, IOobject::NO_WRITE, true),
-                               tensorTemplates[fieldName]())));
+            WarningInFunction
+                << "Unhandled dims " << meta.shape.size()
+                << " for " << meta.file << exit(FatalError);
         }
     }
-    Info << nl;
+    Info<< nl;
 
-    autoPtr<functionObjectList> functionsPtr;
+    // autoPtr<functionObjectList> functionsPtr;
 
     forAll(timeValues, timeIndex)
-
     {
         runTime.setTime(timeValues[timeIndex], timeIndex);
 
-        forAll(fields, fieldInd)
+        for (const word& fieldName : fieldNames)
         {
-            const word fieldName = fields[fieldInd];
             const NpyMeta &meta = metaByField[fieldName];
+
+            bool unhandled_dims = false;
 
             // Now you can read based on meta.shape.size():
             if (meta.shape.size() == 2)
             {
-                scalarField snapshot;
-                readScalarSnapshot(meta, timeIndex, snapshot);
-                volScalarField &scalar_ = scalarFields[fieldName]();
-
-                forAll(scalar_.primitiveFieldRef(), cellI)
-                {
-                    scalar_.primitiveFieldRef()[cellI] = snapshot[cellI];
-                }
-                scalar_.correctBoundaryConditions();
-                scalar_.write();
+                // scalar
+                update_from_snapshot
+                (
+                    meta,
+                    timeIndex,
+                    *(scalarFields[fieldName])
+                );
             }
-
-            else if (meta.shape.size() == 3 && meta.shape[1] == 3)
+            else if (meta.shape.size() == 3)
             {
-                vectorField snapshot;
-                readVectorSnapshot(meta, timeIndex, snapshot);
-                volVectorField &vector_ = vectorFields[fieldName]();
-
-                forAll(vector_.primitiveFieldRef(), cellI)
+                // vector-space types
+                switch (meta.shape[1])
                 {
-                    vector_.primitiveFieldRef()[cellI] = snapshot[cellI];
+                    case pTraits<vector>::nComponents :
+                    {
+                        update_from_snapshot
+                        (
+                            meta,
+                            timeIndex,
+                            *(vectorFields[fieldName])
+                        );
+                        break;
+                    }
+
+                    case pTraits<symmTensor>::nComponents :
+                    {
+                        update_from_snapshot
+                        (
+                            meta,
+                            timeIndex,
+                            *(symmTensorFields[fieldName])
+                        );
+                        break;
+                    }
+
+                    case pTraits<tensor>::nComponents :
+                    {
+                        update_from_snapshot
+                        (
+                            meta,
+                            timeIndex,
+                            *(tensorFields[fieldName])
+                        );
+                        break;
+                    }
+
+                    default :
+                    {
+                        unhandled_dims = true;
+                        break;
+                    }
                 }
-                vector_.correctBoundaryConditions();
-                vector_.write();
             }
-
-            else if (meta.shape.size() == 3 && meta.shape[1] == 6)
-            {
-                symmTensorField snapshot;
-                readSymmTensorSnapshot(meta, timeIndex, snapshot);
-                volSymmTensorField &symmtensor_ = symmTensorFields[fieldName]();
-                forAll(symmtensor_.primitiveFieldRef(), cellI)
-                {
-                    symmtensor_.primitiveFieldRef()[cellI] = snapshot[cellI];
-                }
-                symmtensor_.correctBoundaryConditions();
-                symmtensor_.write();
-            }
-
-            else if (meta.shape.size() == 3 && meta.shape[1] == 9)
-            {
-                tensorField snapshot;
-                readTensorSnapshot(meta, timeIndex, snapshot);
-                volTensorField &tensor_ = tensorFields[fieldName]();
-
-                forAll(tensor_.primitiveFieldRef(), cellI)
-                {
-                    tensor_.primitiveFieldRef()[cellI] = snapshot[cellI];
-                }
-
-                tensor_.correctBoundaryConditions();
-                tensor_.write();
-            }
-
             else
             {
-                FatalErrorInFunction << "Unsupported dims " << meta.shape.size()
-                                     << " for " << meta.file << exit(FatalError);
+                unhandled_dims = true;
+            }
+
+            if (unhandled_dims)
+            {
+                FatalErrorInFunction
+                    << "Unsupported dims " << meta.shape.size()
+                    << " for " << meta.file << exit(FatalError);
             }
         }
-        if (Pstream::master())
-        {
-            Info << "Finished writing fields for time = " << runTime.timeName()
-                 << endl;
-        }
+
+        Info<< "Finished writing fields for time = "
+            << runTime.timeName() << endl;
     }
+
+    Info<< "End\n" << endl;
 
     return 0;
 }
+
 
 // ************************************************************************** //

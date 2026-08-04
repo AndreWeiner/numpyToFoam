@@ -1,3 +1,6 @@
+// Copyright (C) 2026 Tanuj Ravi
+// Copyright (C) 2026 Keysight Technologies
+// SPDX-License-Identifier: (GPL-3.0-or-later)
 
 #include "fvCFD.H"
 #include <fstream>
@@ -125,23 +128,55 @@ static inline double readAtIndex(std::ifstream &f, const bool is_f8,
     return static_cast<double>(v);
   }
 }
-static void readScalarSnapshot(const NpyMeta &meta, const label timeIndex,
-                               scalarField &snapshot)
+
+
+// Templated read of scalar or vector-space fields
+template<class Type>
+static void readSnapshot
+(
+    const NpyMeta& meta,
+    const label timeIndex,
+    Field<Type>& snapshot
+)
 {
-  require(meta.shape.size() == 2, "Expected scalar npy with 2 dims");
+  constexpr bool is_scalar_type = std::is_arithmetic_v<Type>;
+  constexpr direction nCmpt = pTraits<Type>::nComponents;
+  constexpr int expectedShape = (is_scalar_type) ? 2 : 3;
 
-  const label n0 = meta.shape[0];
-  const label n1 = meta.shape[1];
+  // scalar shape : (nCells, nTimes)
+  // vectorspace  : (nCells, nComponents, nTimes)
 
-  label nCells, nTimes;
+  if (meta.shape.size() != expectedShape)
+  {
+      throw std::runtime_error
+      (
+          std::string
+          (
+              "Expected " + std::string(pTraits<Type>::typeName)
+            + " npy with " + std::to_string(expectedShape) + " dims"
+          )
+      );
+  }
 
-  // Shape is still interpreted as (nCells, nTimes)
-  nCells = n0;
-  nTimes = n1;
+  const label nCells = meta.shape[0];
+  const label nCmpt_shape = (is_scalar_type ? 1 : meta.shape[1]);
+  const label nTimes = (is_scalar_type ? meta.shape[1] : meta.shape[2]);
 
+  // require(nCmpt_shape == nCmpt)
+  if (!is_scalar_type && nCmpt_shape != nCmpt)
+  {
+      throw std::runtime_error
+      (
+          std::string
+          (
+              std::string(pTraits<Type>::typeName)
+            + " middle dim must be " + std::to_string(nCmpt)
+          )
+      );
+  }
   require(timeIndex >= 0 && timeIndex < nTimes, "timeIndex out of range");
 
-  snapshot.setSize(nCells);
+  snapshot.resize(nCells);
 
   std::ifstream f(meta.path.c_str(), std::ios::binary);
   require(bool(f), "Cannot open " + std::string(meta.path));
@@ -150,188 +185,86 @@ static void readScalarSnapshot(const NpyMeta &meta, const label timeIndex,
 
   for (label celli = 0; celli < nCells; ++celli)
   {
+    auto& elemValue = snapshot[celli];
     std::streamoff idx;
 
-    if (!meta.fortranOrder)
+    if constexpr (is_scalar_type)
     {
-      // C-order: (nCells, nTimes)
-      // idx = cell*nTimes + time
-      idx = static_cast<std::streamoff>(celli) * nTimes + timeIndex;
+      if (!meta.fortranOrder)
+      {
+        // C-order: (nCells, nCmpt, nTimes)
+        // idx = ((cell*nCmpt + cmpt)*nTimes + time)
+        idx =
+        (
+            (static_cast<std::streamoff>(celli)) * nTimes
+          + timeIndex
+        );
+      }
+      else
+      {
+        // Fortran-order: (nCells, nCmpt, nTimes)
+        // idx = cell + nCells*(comp + nCmpt*time)
+        idx =
+        (
+            static_cast<std::streamoff>(celli)
+          + static_cast<std::streamoff>(nCells) *
+            (timeIndex)
+        );
+      }
+
+      double value =
+            readAtIndex(f, meta.is_f8, meta.dataOffset + idx * elemSize);
+
+      elemValue = value;
     }
     else
     {
-      // Fortran-order: (nCells, nTimes)
-      // idx = cell + time*nCells
-      idx = static_cast<std::streamoff>(celli) +
-            static_cast<std::streamoff>(timeIndex) * nCells;
-    }
+      for (direction cmpt = 0; cmpt < nCmpt; ++cmpt)
+      {
+        if (!meta.fortranOrder)
+        {
+          // C-order: (nCells, nCmpt, nTimes)
+          // idx = ((cell*nCmpt + cmpt)*nTimes + time)
+          idx =
+          (
+              (static_cast<std::streamoff>(celli) * nCmpt + cmpt) * nTimes
+            + timeIndex
+          );
+        }
+        else
+        {
+          // Fortran-order: (nCells, nCmpt, nTimes)
+          // idx = cell + nCells*(comp + nCmpt*time)
+          idx =
+          (
+              static_cast<std::streamoff>(celli)
+            + static_cast<std::streamoff>(nCells) *
+              (cmpt + static_cast<std::streamoff>(nCmpt) * timeIndex)
+          );
+        }
 
-    snapshot[celli] =
-        readAtIndex(f, meta.is_f8, meta.dataOffset + idx * elemSize);
+        double value =
+            readAtIndex(f, meta.is_f8, meta.dataOffset + idx * elemSize);
+
+        elemValue[cmpt] = value;
+      }
+    }
   }
 }
 
-static void readVectorSnapshot(const NpyMeta &meta, const label timeIndex,
-                               vectorField &snapshot)
+
+// Templated read of scalar or vector-space fields
+template<class Type>
+static tmp<Field<Type>> readSnapshot
+(
+    const NpyMeta& meta,
+    const label timeIndex
+)
 {
-  require(meta.shape.size() == 3, "Expected vector npy with 3 dims");
-
-  const label nCells = meta.shape[0];
-  const label nComp = meta.shape[1];
-  const label nTimes = meta.shape[2];
-
-  require(nComp == 3, "Vector middle dim must be 3");
-  require(timeIndex >= 0 && timeIndex < nTimes, "timeIndex out of range");
-
-  snapshot.setSize(nCells);
-
-  std::ifstream f(meta.path.c_str(), std::ios::binary);
-  require(bool(f), "Cannot open " + std::string(meta.path));
-
-  const size_t elemSize = meta.is_f8 ? sizeof(double) : sizeof(float);
-
-  for (label celli = 0; celli < nCells; ++celli)
-  {
-    double vx = 0.0, vy = 0.0, vz = 0.0;
-
-    for (label comp = 0; comp < 3; ++comp)
-    {
-      std::streamoff idx;
-
-      if (!meta.fortranOrder)
-      {
-        // C-order: (nCells, 3, nTimes)
-        // idx = ((cell*3 + comp)*nTimes + time)
-        idx = (static_cast<std::streamoff>(celli) * 3 + comp) * nTimes +
-              timeIndex;
-      }
-      else
-      {
-        // Fortran-order: (nCells, 3, nTimes)
-        // idx = cell + nCells*(comp + 3*time)
-        idx = static_cast<std::streamoff>(celli) +
-              static_cast<std::streamoff>(nCells) *
-                  (comp + static_cast<std::streamoff>(3) * timeIndex);
-      }
-
-      const double val =
-          readAtIndex(f, meta.is_f8, meta.dataOffset + idx * elemSize);
-
-      if (comp == 0)
-        vx = val;
-      else if (comp == 1)
-        vy = val;
-      else
-        vz = val;
-    }
-
-    snapshot[celli] = vector(vx, vy, vz);
-  }
+  auto tresult = tmp<Field<Type>>::New();
+  readSnapshot(meta, timeIndex, tresult.ref());
+  return tresult;
 }
 
-static void readSymmTensorSnapshot(const NpyMeta &meta, const label timeIndex,
-                                   symmTensorField &snapshot)
-{
-  require(meta.shape.size() == 3, "Expected symmetric tensor npy with 3 dims");
 
-  const label nCells = meta.shape[0];
-  const label nComp = meta.shape[1];
-  const label nTimes = meta.shape[2];
-
-  require(nComp == 6, "SymmTensor middle dim must be 6");
-  require(timeIndex >= 0 && timeIndex < nTimes, "timeIndex out of range");
-
-  snapshot.setSize(nCells);
-
-  std::ifstream f(meta.path.c_str(), std::ios::binary);
-  require(bool(f), "Cannot open " + std::string(meta.path));
-
-  const size_t elemSize = meta.is_f8 ? sizeof(double) : sizeof(float);
-
-  for (label celli = 0; celli < nCells; ++celli)
-  {
-    double c[6];
-
-    for (label comp = 0; comp < 6; ++comp)
-    {
-      std::streamoff idx;
-
-      if (!meta.fortranOrder)
-      {
-        // C-order: (nCells, 6, nTimes)
-        // idx = ((cell*6 + comp)*nTimes + time)
-        idx = (static_cast<std::streamoff>(celli) * 6 + comp) * nTimes +
-              timeIndex;
-      }
-      else
-      {
-        // Fortran-order: (nCells, 6, nTimes)
-        // idx = cell + nCells*(comp + 6*time)
-        idx = static_cast<std::streamoff>(celli) +
-              static_cast<std::streamoff>(nCells) *
-                  (comp + static_cast<std::streamoff>(6) * timeIndex);
-      }
-
-      c[comp] = readAtIndex(f, meta.is_f8, meta.dataOffset + idx * elemSize);
-    }
-
-    snapshot[celli] = symmTensor(c[0], // xx
-                                 c[1], // xy
-                                 c[2], // xz
-                                 c[3], // yy
-                                 c[4], // yz
-                                 c[5]  // zz
-    );
-  }
-}
-
-static void readTensorSnapshot(const NpyMeta &meta, const label timeIndex,
-                               tensorField &snapshot)
-{
-  require(meta.shape.size() == 3, "Expected tensor npy with 3 dims");
-
-  const label nCells = meta.shape[0];
-  const label nComp = meta.shape[1];
-  const label nTimes = meta.shape[2];
-
-  require(nComp == 9, "Tensor middle dim must be 9");
-  require(timeIndex >= 0 && timeIndex < nTimes, "timeIndex out of range");
-
-  snapshot.setSize(nCells);
-
-  std::ifstream f(meta.path.c_str(), std::ios::binary);
-  require(bool(f), "Cannot open " + std::string(meta.path));
-
-  const size_t elemSize = meta.is_f8 ? sizeof(double) : sizeof(float);
-
-  for (label celli = 0; celli < nCells; ++celli)
-  {
-    double c[9];
-
-    for (label comp = 0; comp < 9; ++comp)
-    {
-      std::streamoff idx;
-
-      if (!meta.fortranOrder)
-      {
-        // C-order: (nCells, 9, nTimes)
-        // idx = ((cell*9 + comp)*nTimes + time)
-        idx = (static_cast<std::streamoff>(celli) * 9 + comp) * nTimes +
-              timeIndex;
-      }
-      else
-      {
-        // Fortran-order: (nCells, 9, nTimes)
-        // idx = cell + nCells*(comp + 9*time)
-        idx = static_cast<std::streamoff>(celli) +
-              static_cast<std::streamoff>(nCells) *
-                  (comp + static_cast<std::streamoff>(9) * timeIndex);
-      }
-
-      c[comp] = readAtIndex(f, meta.is_f8, meta.dataOffset + idx * elemSize);
-    }
-
-    snapshot[celli] =
-        tensor(c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8]);
-  }
-}
+// ************************************************************************* //

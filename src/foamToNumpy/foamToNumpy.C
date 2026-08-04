@@ -5,7 +5,8 @@
     \\  /    A nd           | www.openfoam.com
      \\/     M anipulation  |
 -------------------------------------------------------------------------------
-    Copyright (C) 2026 AUTHOR,AFFILIATION
+    Copyright (C) 2026 Tanuj Ravi
+    Copyright (C) 2026 Keysight Technologies
 -------------------------------------------------------------------------------
 License
     This file is part of OpenFOAM.
@@ -34,6 +35,7 @@ Description
 #include "IOdictionary.H"
 #include "argList.H"
 #include "writeData.H"
+
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 int main(int argc, char *argv[])
@@ -48,44 +50,15 @@ int main(int argc, char *argv[])
     runTime.printExecutionTime(Info);
     const word dictName("foamToNumpyDict");
 
-    fileName dictPath;
+    // Dictionary default location is 'system'
+    #include "setSystemRunTimeDictionaryIO.H"
 
-    if (args.readIfPresent("dict", dictPath))
-    {
-        // Dictionary specified on the command-line ...
+    Info<< "Reading foamToNumpy settings from "
+        << dictIO.objectRelPath() << endl;
 
-        if (isDir(dictPath))
-        {
-            dictPath /= dictName;
-        }
-    }
-    else
-    {
-        // Assume dictionary is to be found in the system directory
+    const IOdictionary dict(dictIO);
 
-        dictPath = runTime.system() / dictName;
-    }
-
-    IOobject DictIO(
-        dictPath,
-        runTime,
-        IOobject::MUST_READ,
-        IOobject::NO_WRITE,
-        false);
-
-    if (!DictIO.typeHeaderOk<IOdictionary>(true))
-    {
-        FatalErrorInFunction
-            << DictIO.objectPath() << nl
-            << exit(FatalError);
-    }
-
-    Info << "Reading foamToNumpy settings from "
-         << DictIO.objectRelPath() << endl;
-
-    const IOdictionary dict(DictIO);
-
-    wordList fields;
+    wordList fieldNames;
 
     word dataTypeWord_field = "float64";
     npyType dtype_field = parseNpyType(dataTypeWord_field);
@@ -93,7 +66,7 @@ int main(int argc, char *argv[])
     if (dict.found("fields"))
     {
         const dictionary &fieldDict = dict.subDict("fields");
-        fields = fieldDict.get<wordList>("names");
+        fieldNames = fieldDict.get<wordList>("names");
         dataTypeWord_field = fieldDict.getOrDefault<word>("dataType", "float64");
         dtype_field = parseNpyType(dataTypeWord_field);
     }
@@ -113,27 +86,20 @@ int main(int argc, char *argv[])
     if (dict.found("exportData"))
     {
         const dictionary &exportDict = dict.subDict("exportData");
-        writeCellCentre = exportDict.getOrDefault<bool>("cellCentre", false);
-        writeCellVolumes = exportDict.getOrDefault<bool>("cellVolumes", false);
-        writeWriteTimes = exportDict.getOrDefault<bool>("writeTimes", false);
-        dataTypeWord_export = exportDict.getOrDefault<word>("dataType", "float64");
+        exportDict.readIfPresent("cellCentre", writeCellCentre);
+        exportDict.readIfPresent("cellVolumes", writeCellVolumes);
+        exportDict.readIfPresent("writeTimes", writeWriteTimes);
+        exportDict.readIfPresent("dataType", dataTypeWord_export);
         dtype_export = parseNpyType(dataTypeWord_export);
     }
 
     const word storageOrderWord = dict.getOrDefault<word>("storageOrder", "C");
     const bool fortranOrder = parseFortranOrder(storageOrderWord);
-    fileName caseDir = runTime.path();     // .../case/processorN
-    fileName rootCaseDir = caseDir.path(); // .../case
-    fileName dataSubDir = dict.getOrDefault<fileName>("dataDir", "data");
-    fileName dataDir;
 
-    if (dataSubDir.isAbsolute())
+    fileName dataDir(dict.getOrDefault<fileName>("dataDir", "data"));
+    if (!dataDir.isAbsolute())
     {
-        dataDir = dataSubDir;
-    }
-    else
-    {
-        dataDir = rootCaseDir / dataSubDir;
+        dataDir = runTime.rootPath() / dataDir;
     }
 
     if (Pstream::master() && !isDir(dataDir))
@@ -144,55 +110,60 @@ int main(int argc, char *argv[])
     instantList allTimes = runTime.times();
     instantList selectedTimes;
 
-    label count = 0;
-    if (every <= 0)
     {
-        FatalErrorInFunction
-            << "'every' must be greater than 0" << nl
-            << exit(FatalError);
-    }
+        DynamicList<label> timeIndices(allTimes.size());
 
-    forAll(allTimes, i)
-    {
-        const instant &t = allTimes[i];
-
-        // Skip constant
-        if (t.name() == runTime.constant())
+        if (every <= 0)
         {
-            continue;
+            FatalErrorInFunction
+                << "'every' must be greater than 0" << nl
+                << exit(FatalError);
         }
 
-        const scalar timeValue = t.value();
-
-        // Keep only times inside [startTime, endTime]
-        if (timeValue >= t_start && timeValue <= t_end)
+        label count = 0;
+        forAll(allTimes, i)
         {
-            if (count % every == 0)
+            const auto& t = allTimes[i];
+
+            // Skip constant
+            if (t.name() == runTime.constant())
             {
-                selectedTimes.append(t);
+                continue;
             }
-            ++count;
-        }
-    }
 
-    if (selectedTimes.empty())
-    {
-        FatalErrorInFunction
-            << "No times selected in range [" << t_start
-            << ", " << t_end << "]"
-            << exit(FatalError);
+            const scalar timeValue = t.value();
+
+            // Keep only times inside [startTime, endTime]
+            if (timeValue >= t_start && timeValue <= t_end)
+            {
+                if (count % every == 0)
+                {
+                    timeIndices.append(i);
+                }
+                ++count;
+            }
+        }
+
+        selectedTimes = instantList(allTimes, timeIndices);
+
+        if (selectedTimes.empty())
+        {
+            FatalErrorInFunction
+                << "No times selected in range [" << t_start
+                << ", " << t_end << "]"
+                << exit(FatalError);
+        }
     }
 
     runTime.setTime(selectedTimes[0], 0);
 
-    // List<fieldMeta> metadata(fields.size());
     DynamicList<fieldMeta> metadata;
 
     Info << "Inspecting fields at initial selected time "
          << runTime.timeName() << nl;
-    forAll(fields, i)
+
+    for (const word& fieldName : fieldNames)
     {
-        const word &fieldName = fields[i];
         const fileName fieldDir = dataDir / fieldName;
 
         bool skipField = false;
@@ -307,12 +278,14 @@ int main(int argc, char *argv[])
 
         if (meta.kind == fieldKind::SCALAR)
         {
-            npyWriter<volScalarField> writer(
+            npyWriter<scalarField> writer
+            (
                 meta,
                 shape,
                 dtype_field,
                 fortranOrder,
-                selectedTimes.size());
+                selectedTimes.size()
+            );
 
             forAll(selectedTimes, timei)
             {
@@ -327,19 +300,21 @@ int main(int argc, char *argv[])
                     false);
 
                 volScalarField fld(io, mesh);
-                writer.write(fld, timei);
+                writer.write(fld.primitiveField(), timei);
             }
 
             writer.flush();
         }
         else if (meta.kind == fieldKind::VECTOR)
         {
-            npyWriter<volVectorField> writer(
+            npyWriter<vectorField> writer
+            (
                 meta,
                 shape,
                 dtype_field,
                 fortranOrder,
-                selectedTimes.size());
+                selectedTimes.size()
+            );
 
             forAll(selectedTimes, timei)
             {
@@ -354,19 +329,21 @@ int main(int argc, char *argv[])
                     false);
 
                 volVectorField fld(io, mesh);
-                writer.write(fld, timei);
+                writer.write(fld.primitiveField(), timei);
             }
 
             writer.flush();
         }
         else if (meta.kind == fieldKind::SYMM_TENSOR)
         {
-            npyWriter<volSymmTensorField> writer(
+            npyWriter<symmTensorField> writer
+            (
                 meta,
                 shape,
                 dtype_field,
                 fortranOrder,
-                selectedTimes.size());
+                selectedTimes.size()
+            );
 
             forAll(selectedTimes, timei)
             {
@@ -381,25 +358,28 @@ int main(int argc, char *argv[])
                     false);
 
                 volSymmTensorField fld(io, mesh);
-                writer.write(fld, timei);
+                writer.write(fld.primitiveField(), timei);
             }
 
             writer.flush();
         }
         else if (meta.kind == fieldKind::TENSOR)
         {
-            npyWriter<volTensorField> writer(
+            npyWriter<tensorField> writer
+            (
                 meta,
                 shape,
                 dtype_field,
                 fortranOrder,
-                selectedTimes.size());
+                selectedTimes.size()
+            );
 
             forAll(selectedTimes, timei)
             {
                 runTime.setTime(selectedTimes[timei], timei);
 
-                IOobject io(
+                IOobject io
+                (
                     meta.name,
                     runTime.timeName(),
                     mesh,
@@ -408,7 +388,7 @@ int main(int argc, char *argv[])
                     false);
 
                 volTensorField fld(io, mesh);
-                writer.write(fld, timei);
+                writer.write(fld.primitiveField(), timei);
             }
 
             writer.flush();
@@ -419,7 +399,7 @@ int main(int argc, char *argv[])
     {
         const fileName timesDir = dataDir / "times";
 
-        if (isDir(timesDir))
+        if (Foam::isDir(timesDir))
         {
             WarningInFunction
                 << "Output directory already exists for times export." << nl
@@ -429,8 +409,7 @@ int main(int argc, char *argv[])
 
         else
         {
-
-            mkDir(timesDir);
+            Foam::mkDir(timesDir);
 
             scalarField timesFld(selectedTimes.size());
 
@@ -452,12 +431,14 @@ int main(int argc, char *argv[])
             const std::vector<std::size_t> timesShape =
                 makeShape(1, timesMeta.nCells, timesMeta.nComp);
 
-            npyWriter<scalarField> timesWriter(
+            npyWriter<scalarField> timesWriter
+            (
                 timesMeta,
                 timesShape,
                 dtype_export,
                 fortranOrder,
-                1);
+                1
+            );
 
             timesWriter.write(timesFld, 0);
             timesWriter.flush();
@@ -511,14 +492,16 @@ int main(int argc, char *argv[])
             const std::vector<std::size_t> shape =
                 makeShape(1, centreMeta.nCells, centreMeta.nComp);
 
-            npyWriter<volVectorField> writer(
+            npyWriter<vectorField> writer
+            (
                 centreMeta,
                 shape,
                 dtype_export,
                 fortranOrder,
-                1);
+                1
+            );
 
-            writer.write(C, 0);
+            writer.write(C.primitiveField(), 0);
             writer.flush();
         }
     }
@@ -530,7 +513,7 @@ int main(int argc, char *argv[])
 
         if (Pstream::master())
         {
-            if (isDir(volDir))
+            if (Foam::isDir(volDir))
             {
                 WarningInFunction
                     << "Output directory already exists for cellVolumes export." << nl
@@ -540,7 +523,7 @@ int main(int argc, char *argv[])
             }
             else
             {
-                mkDir(volDir);
+                Foam::mkDir(volDir);
             }
         }
         reduce(skipCellVolumes, orOp<bool>());
@@ -569,16 +552,24 @@ int main(int argc, char *argv[])
             const std::vector<std::size_t> shape =
                 makeShape(1, volMeta.nCells, volMeta.nComp);
 
-            npyWriter<scalarField> writer(
+            npyWriter<scalarField> writer
+            (
                 volMeta,
                 shape,
                 dtype_export,
                 fortranOrder,
-                1);
+                1
+            );
 
             writer.write(V, 0);
             writer.flush();
         }
     }
+
+    Info<< "End\n" << endl;
+
+    return 0;
 }
+
+
 // ************************************************************************* //

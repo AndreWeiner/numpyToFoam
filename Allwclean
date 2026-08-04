@@ -1,10 +1,11 @@
 #!/bin/sh
+cd "${0%/*}" || exit                            # Run from this directory
 set -e
-
-cd "${0%/*}" || exit 1
 
 for app in src/foamToNumpy src/numpyToFoam
 do
     echo "Cleaning ${app}..."
     (cd "${app}" && wclean)
 done
+
+#------------------------------------------------------------------------------

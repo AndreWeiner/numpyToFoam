@@ -92,22 +92,22 @@ namespace Foam
 
     inline std::string shapeString(const std::vector<std::size_t> &shape)
     {
-        std::ostringstream os;
-        os << "(";
-        for (std::size_t i = 0; i < shape.size(); ++i)
+        if (shape.size() == 1)
         {
-            os << shape[i];
-            if (shape.size() == 1 || i + 1 < shape.size())
-            {
-                os << ",";
-                if (i + 1 < shape.size())
-                {
-                    os << " ";
-                }
-            }
+            return "(" + std::to_string(shape[0]) + ",)";
         }
-        os << ")";
-        return os.str();
+        else
+        {
+            std::ostringstream os;
+            os << "(";
+            for (std::size_t i = 0; i < shape.size(); ++i)
+            {
+                if (i) os << ", ";
+                os << shape[i];
+            }
+            os << ")";
+            return os.str();
+        }
     }
 
     inline std::string makeNpyHeader(
@@ -167,7 +167,7 @@ namespace Foam
         const label nComp)
     {
         // shape = (nCells, nComp, nTimes)
-        if (nComp == 1)
+        if (nComp <= 1)
         {
             return {
                 static_cast<std::size_t>(nCells),
@@ -227,7 +227,7 @@ namespace Foam
     // npyWriter
     //------------------------------------------------------------------------------
 
-    template <class GeoField>
+    template<class FieldType>
     class npyWriter
     {
         std::ofstream os_;
@@ -236,20 +236,21 @@ namespace Foam
         bool fortranOrder_;
         fieldMeta meta_;
         std::size_t dataStart_;
+        std::size_t elemSize_;
         label nComp_;
         label nTimes_;
         label nCells_;
 
-        void writeNumber(const scalar val)
+        void writeNumber(scalar val)
         {
             if (dtype_ == npyType::FLOAT32)
             {
-                const float out = static_cast<float>(val);
+                float out = static_cast<float>(val);
                 os_.write(reinterpret_cast<const char *>(&out), sizeof(float));
             }
             else
             {
-                const double out = static_cast<double>(val);
+                double out = static_cast<double>(val);
                 os_.write(reinterpret_cast<const char *>(&out), sizeof(double));
             }
         }
@@ -266,6 +267,7 @@ namespace Foam
               fortranOrder_(fortranOrder),
               meta_(meta),
               dataStart_(0),
+              elemSize_(dtypeSize(dtype)),
               nComp_(meta.nComp),
               nTimes_(nTimes),
               nCells_(meta.nCells)
@@ -280,11 +282,22 @@ namespace Foam
             }
 
             dataStart_ = writeNpyHeader(os_, shape_, dtype_, fortranOrder_);
+
+            #ifdef FULLDEBUG
+            using value_type = typename FieldType::value_type;
+            if (nComp_ != pTraits<value_type>::nComponents)
+            {
+                WarningInFunction
+                    << "Meta has nComponents=" << nComp_
+                    << " but field expected to have nComponents="
+                    << int(pTraits<value_type>::nComponents) << endl;
+            }
+            #endif
         }
 
         void seekToElement(const std::size_t elem)
         {
-            os_.seekp(dataStart_ + elem * dtypeSize(dtype_), std::ios::beg);
+            os_.seekp(dataStart_ + elem * elemSize_, std::ios::beg);
         }
 
         std::size_t getElem(
@@ -292,7 +305,7 @@ namespace Foam
             const label compi,
             const label timei) const
         {
-            if (nComp_ == 1)
+            if (nComp_ <= 1)
             {
                 // shape = (nCells, nTimes)
                 if (fortranOrder_)
@@ -327,7 +340,7 @@ namespace Foam
             }
         }
 
-        void write(const GeoField &fld, const label timei)
+        void write(const FieldType& fld, const label timei)
         {
             if (fld.size() != nCells_)
             {
@@ -338,7 +351,7 @@ namespace Foam
                     << exit(FatalError);
             }
 
-            if (nComp_ == 1)
+            if (nComp_ <= 1)
             {
                 for (label celli = 0; celli < nCells_; ++celli)
                 {
