@@ -10,7 +10,7 @@ These snapshots are processed sequentially in time, avoiding the need to store l
 ---
 
 ## Dependencies
-- OpenFOAM 2112, 2206, 2312, 2412, or 2512 (tested versions)
+- OpenFOAM 2412, or 2512 (tested versions)
 - A working C++ compiler available in the OpenFOAM environment (e.g. `g++`)
 
 ---
