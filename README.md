@@ -324,7 +324,7 @@ Replace `2` with the number of processors used for case decomposition.
 
 A unit test framework is provided to validate both utilities across multiple OpenFOAM versions using Apptainer containers. The pipeline runs an `icoFoam` cavity simulation, exports the results to `.npy` with `foamToNumpy`, reconstructs the fields with `numpyToFoam`, and verifies correctness by comparing MD5 checksums of the reconstructed processor field files against the original simulation output.
 
-**Tested OpenFOAM versions:** 2112, 2206, 2312, 2412, 2512 (tested versions)
+**Tested OpenFOAM versions:** 2412, 2512 (tested versions)
 
 For each version the following steps are executed in order:
 
