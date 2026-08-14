@@ -1,8 +1,8 @@
 /*--------------------------------*- C++ -*----------------------------------*\
 | =========                 |                                                 |
 | \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
-|  \\    /   O peration     | Version:  v2006                                 |
-|   \\  /    A nd           | Website:  www.openfoam.com                      |
+|  \\    /   O peration     | Website:  www.openfoam.com                      |
+|   \\  /    A nd           |                                                 |
 |    \\/     M anipulation  |                                                 |
 \*---------------------------------------------------------------------------*/
 FoamFile
@@ -47,6 +47,16 @@ runTimeModifiable true;
 
 functions
 {
+    numpyExport
+    {
+        type                foamToNumpy;
+        libs                (numpyFunctionObjects);
+        fields              (p U);
+        batchSize           100;
+        writeCellVolumes    true;
+        writeControl        writeTime;
+    }
+
     volFieldSums
     {
         type            volFieldValue;

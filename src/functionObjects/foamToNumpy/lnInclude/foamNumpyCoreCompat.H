@@ -1,0 +1,1 @@
+../foamNumpyCoreCompat.H

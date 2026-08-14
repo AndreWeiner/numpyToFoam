@@ -1,0 +1,145 @@
+#!/bin/bash
+cd "${0%/*}" || exit 1
+. "${WM_PROJECT_DIR:?}/bin/tools/RunFunctions"
+set -eo pipefail
+
+test_dir=$(mktemp -d "${TMPDIR:-/tmp}/numpyFunctionObjects.XXXXXX")
+trap 'rm -rf -- "$test_dir"' EXIT
+
+dict_dir="$PWD/integration/dictionaries"
+prepare_cavity="$PWD/prepare_cavity"
+python_check="$PWD/check_numpy_roundtrip.py"
+python_forces="$PWD/check_forces.py"
+python_layout="$PWD/check_function_object.py"
+
+echo "Running volume function-object tests in $test_dir"
+"$prepare_cavity" "$test_dir/cavity"
+
+(
+    cd "$test_dir/cavity"
+    ./Allrun
+    mpirun -np 4 postProcess -parallel \
+        -dict system/controlDict.numpy -time '0.1:0.5'
+    mpirun -np 4 icoFoam -postProcess -parallel \
+        -dict system/nativeForcesDict -time 0.5
+    mpirun -np 4 numpyPostProcess -parallel
+    python3 "$python_check" \
+        postProcessing/numpyExport/0.1 \
+        postProcessing/numpyReExport/0.1 p U
+    mpirun -np 4 numpyPostProcess -parallel \
+        -dict numpyPostProcessForcesDict -time 0.5
+    force_file=$(find postProcessing/importedForces -name force.dat -print -quit)
+    native_force_file=$(find postProcessing/nativeForces -name force.dat -print -quit)
+    python3 "$python_forces" "$force_file" "$native_force_file"
+)
+
+echo "Running online cadence test"
+"$prepare_cavity" "$test_dir/cavity-online"
+(
+    cd "$test_dir/cavity-online"
+    cp system/controlDict.numpy system/controlDict
+    runApplication blockMesh
+    runApplication decomposePar
+    runParallel icoFoam
+    python3 "$python_layout" \
+        postProcessing/numpyExport 0.1 0.2 0.3 0.4 0.5
+)
+
+echo "Running compressible force test"
+cp -a "$FOAM_TUTORIALS/compressible/rhoSimpleFoam/squareBend" \
+    "$test_dir/compressible"
+(
+    cd "$test_dir/compressible"
+    ./Allrun.pre
+    foamDictionary system/controlDict -entry endTime -set 2
+    foamDictionary system/controlDict -entry writeInterval -set 1
+    foamDictionary system/controlDict -entry functions -set '{}'
+    runApplication rhoSimpleFoam
+    cp "$dict_dir/compressibleExport" system/compressibleExport
+    cp "$dict_dir/compressibleForces" system/compressibleForces
+    cp "$dict_dir/compressibleNativeForces" system/compressibleNativeForces
+    postProcess -dict system/compressibleExport -time '1:2'
+    rhoSimpleFoam -postProcess \
+        -dict system/compressibleNativeForces -time '1:2'
+    numpyPostProcess -dict compressibleForces -time '1:2'
+    force_file=$(find postProcessing/importedForces -name force.dat -print -quit)
+    native_force_file=$(find postProcessing/nativeForces -name force.dat -print -quit)
+    python3 "$python_forces" "$force_file" "$native_force_file"
+)
+
+echo "Running thermal-shell finite-area test"
+cp -a \
+    "$FOAM_TUTORIALS/heatTransfer/buoyantPimpleFoam/hotRoomWithThermalShell" \
+    "$test_dir/thermal-shell"
+(
+    cd "$test_dir/thermal-shell"
+    if [[ -x ./Allrun.pre ]]
+    then
+        ./Allrun.pre
+    else
+        runApplication blockMesh
+        runApplication topoSet
+        runApplication createPatch -overwrite
+    fi
+    runApplication makeFaMesh
+    cp "$dict_dir/thermalVolumeExport" system/thermalVolumeExport
+    cp "$dict_dir/thermalAreaExport" system/thermalAreaExport
+    cp "$dict_dir/thermalDriver" system/thermalDriver
+
+    thermal_area_fields=(Ts hs)
+    if grep -q Ts_ceilingShell system/finite-area/faSchemes
+    then
+        thermal_area_fields=(Ts_ceilingShell h_ceilingShell)
+        area_field_list="(${thermal_area_fields[*]})"
+        foamDictionary system/thermalAreaExport \
+            -entry functions.thermalAreaExport.areaFields \
+            -set "$area_field_list"
+        foamDictionary system/thermalDriver \
+            -entry finiteAreaInput.areaFields \
+            -set "$area_field_list"
+        foamDictionary system/thermalDriver \
+            -entry functions.thermalAreaReExport.areaFields \
+            -set "$area_field_list"
+        foamDictionary system/thermalDriver \
+            -entry functions.importedArea.fields \
+            -set "$area_field_list"
+    fi
+
+    postProcess -dict system/thermalVolumeExport -time 0
+    buoyantPimpleFoam -postProcess -dict system/thermalAreaExport -time 0
+    numpyPostProcess -dict thermalDriver
+    python3 "$python_check" \
+        postProcessing/thermalVolumeExport/0 \
+        postProcessing/thermalVolumeReExport/0 p U p_rgh k epsilon
+    python3 "$python_check" \
+        postProcessing/thermalAreaExport/region0/0 \
+        postProcessing/thermalAreaReExport/region0/0 \
+        "${thermal_area_fields[@]}"
+    test -s postProcessing/importedArea/0/region0.vtp
+)
+
+echo "Running finite-area edge-field test"
+cp -a "$FOAM_TUTORIALS/finiteArea/liquidFilmFoam/cylinder" \
+    "$test_dir/edge-fields"
+(
+    cd "$test_dir/edge-fields"
+    restore0Dir
+    runApplication blockMesh
+    runApplication makeFaMesh
+    runApplication setFields
+    foamDictionary system/controlDict -entry endTime -set 0.0002
+    foamDictionary system/controlDict -entry writeInterval -set 1
+    foamDictionary system/controlDict -entry functions -set '{}'
+    runApplication liquidFilmFoam
+    cp "$dict_dir/edgeExport" system/edgeExport
+    cp "$dict_dir/edgeDriver" system/edgeDriver
+    postProcess -dict system/edgeExport -time 0.0002
+    numpyPostProcess -dict edgeDriver -time 0.0002
+    python3 "$python_check" \
+        postProcessing/edgeExport/region0/0.0002 \
+        postProcessing/edgeReExport/region0/0.0002 h Us phis phi2s
+)
+
+echo "All NumPy function-object integration tests passed"
+
+#------------------------------------------------------------------------------

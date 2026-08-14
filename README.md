@@ -1,395 +1,371 @@
-# numpyToFoam
+# OpenFOAM NumPy function objects
 
-## General Description
-`numpyToFoam` is a custom OpenFOAM utility for reconstructing OpenFOAM field data from NumPy (`.npy`) arrays. It supports scalar, vector, symmetric tensor, and full tensor fields.
+This project provides native OpenFOAM function objects for exchanging field
+snapshots with NumPy while a solver is running or during post-processing:
 
-The field values over the computational cells at a given time instant constitute a **snapshot**. A collection of such snapshots over multiple time steps forms the input dataset used by the utility.
+- `foamToNumpy`: volume-field export
+- `numpyToFoam`: volume-field import
+- `finiteAreaToNumpy`: finite-area face/edge-field export
+- `finiteAreaToFoam`: finite-area face/edge-field import
+- `numpyPostProcess`: a driver that imports NumPy snapshots and immediately
+  runs ordinary OpenFOAM function objects without staging native field files
 
-These snapshots are processed sequentially in time, avoiding the need to store large datas
+The standalone `foamToNumpy` and `numpyToFoam` applications are retained for
+legacy workflows. New development targets the function objects and
+`numpyPostProcess`.
 
----
+All new NumPy arrays use Fortran order. C-order output is not available and
+C-order input is rejected.
 
-## Dependencies
-- OpenFOAM 2412, or 2512 (tested versions)
-- A working C++ compiler available in the OpenFOAM environment (e.g. `g++`)
+## Compatibility and build
 
----
+The supported release matrix is OpenFOAM v2506, v2512, and v2606. The
+implementation also builds against the current development line. On
+development (API 2607 and newer), it uses OpenFOAM's
+`Foam::fileFormats::numpyCore`. On v2606 and earlier releases, a private
+compatibility implementation supplies the same small header-writing interface;
+a development installation is therefore not needed to compile a release
+version.
 
-## Compilation and Installation
-In a working OpenFOAM environment:
-
-```bash
-./Allwmake
-```
-
-Both utilities will be compiled and made available within your OpenFOAM environment.
-
-To clean both builds:
-
-```bash
-./Allwclean
-```
-
-To compile only `numpyToFoam`:
-
-```bash
-cd src/numpyToFoam
-wmake
-```
-
-To clean only `numpyToFoam`:
-
-```bash
-cd src/numpyToFoam
-wclean
-```
-
----
-
-## Usage
-
-### Requirements
-
-To use the utility, the following are required:
-
-#### 1. OpenFOAM Case
-- A decomposed OpenFOAM case (parallel setup required)
-- Mesh must be available in `processor*/` directories
-- Optional: `0/` directory with initial and boundary conditions
-
-#### 2. NumPy Snapshot Files
-- Data must be stored as `.npy` files, organised in one subdirectory per field:
-
-```
-data/
-├── p/
-│   ├── p_proc_0.npy
-│   └── p_proc_1.npy
-└── U/
-    ├── U_proc_0.npy
-    └── U_proc_1.npy
-```
-
-- Naming convention:
-
-```bash
-dataDir/fieldName/fieldName_proc_i.npy
-```
-
-where:
-- `fieldName` is the OpenFOAM field name, for example `p` or `U`
-- `i` is the processor index
-
-#### Supported Shapes
-
-| Field Type        | Shape                     |
-|-------------------|---------------------------|
-| Scalar            | `(nCells, nTimeSteps)`    |
-| Vector            | `(nCells, 3, nTimeSteps)` |
-| Symmetric Tensor  | `(nCells, 6, nTimeSteps)` |
-| Tensor            | `(nCells, 9, nTimeSteps)` |
-
-#### Storage Format
-- Both **row-major (C-order)** and **column-major (Fortran-order)** storage formats are supported
-- The utility automatically detects the array storage format from the `.npy` header
-- **Recommended:** use column-major format for faster snapshot access
-
-#### 3. `numpyToFoamDict`
-A `numpyToFoamDict` file must be present in the `system/` directory.
-
-This dictionary controls:
-- the location of the `.npy` files (`dataDir`)
-- the list of fields to reconstruct
-- the time range and time-step size used for writing OpenFOAM fields
-
-Example:
-
-```plaintext
-dataDir    data;
-
-fields     (p U);
-
-time
-{
-    startTime   0;
-    endTime     1;
-    deltaT      0.1;
-}
-```
-
-#### Dictionary entries
-
-| Entry | Description |
-|-------|-------------|
-| `dataDir` | Directory containing the `.npy` files, relative to the case root (or absolute). Default: `data`. |
-| `fields` | List of OpenFOAM field names to reconstruct (e.g. `(p U)`). The storage format and precision are detected automatically from each `.npy` header. |
-| `time/startTime` | Time value of the first snapshot to write. |
-| `time/endTime` | Time value of the last snapshot to write. |
-| `time/deltaT` | Time-step size used to generate uniformly spaced output times between `startTime` and `endTime`. |
-
-The number of generated time steps must match the number of snapshots stored in the `.npy` files.
-
----
-
-### Running the Utility
-
-```bash
-mpirun -np 2 numpyToFoam -parallel
-```
-
-Replace `2` with the number of processors used for case decomposition.
-
----
-
-# foamToNumpy
-
-## General Description
-`foamToNumpy` is a custom OpenFOAM utility for extracting OpenFOAM field data into NumPy (`.npy`) arrays. It is the reverse of `numpyToFoam`. It supports scalar, vector, symmetric tensor, and full tensor fields.
-
-All snapshots for a given field are packed into a single `.npy` file per processor, avoiding repeated file I/O.
-
-The utility can optionally export mesh geometry data (cell centres, cell volumes) and the selected time values as additional `.npy` files.
-
----
-
-## Dependencies
-- OpenFOAM 2112, 2206, 2312, 2412, or 2512 (tested versions)
-- A working C++ compiler available in the OpenFOAM environment (e.g. `g++`)
-
----
-
-## Compilation and Installation
-In a working OpenFOAM environment:
+From an initialized OpenFOAM environment:
 
 ```bash
 ./Allwmake
 ```
 
-Both utilities will be compiled and made available within your OpenFOAM environment.
+This builds `libnumpyFunctionObjects`, `numpyPostProcess`, and the two legacy
+applications. Use `./Allwclean` to clean all targets.
 
-To clean both builds:
+## Volume export
 
-```bash
-./Allwclean
-```
+Add the following to `system/controlDict`, or to a separate dictionary passed
+to `postProcess -dict`:
 
-To compile only `foamToNumpy`:
-
-```bash
-cd src/foamToNumpy
-wmake
-```
-
-To clean only `foamToNumpy`:
-
-```bash
-cd src/foamToNumpy
-wclean
-```
-
----
-
-## Usage
-
-### Requirements
-
-#### 1. OpenFOAM Case
-- A decomposed OpenFOAM case (parallel setup required)
-- Field data must be available in `processor*/` directories for the selected time range
-
-#### 2. Output File Structure
-Each field is written into its own subdirectory inside `dataDir`:
-
-```
-data/
-├── p/
-│   ├── p_proc_0.npy
-│   └── p_proc_1.npy
-└── U/
-    ├── U_proc_0.npy
-    └── U_proc_1.npy
-```
-
-Naming convention:
-
-```bash
-dataDir/fieldName/fieldName_proc_i.npy
-```
-
-where `i` is the processor index.
-
-#### Output Shapes
-
-| Field Type        | Shape                      |
-|-------------------|----------------------------|
-| Scalar            | `(nCells, nTimeSteps)`     |
-| Vector            | `(nCells, 3, nTimeSteps)`  |
-| Symmetric Tensor  | `(nCells, 6, nTimeSteps)`  |
-| Tensor            | `(nCells, 9, nTimeSteps)`  |
-
-#### Storage Format
-- Both **row-major (C-order)** and **column-major (Fortran-order)** storage formats are supported
-- The storage format is set via `storageOrder` in the dictionary
-- **Recommended:** use column-major format for faster snapshot access along the time axis
-
-#### 3. `foamToNumpyDict`
-A `foamToNumpyDict` file must be present in the `system/` directory.
-
-This dictionary controls:
-- the output location for `.npy` files (`dataDir`)
-- the list of fields to extract and their output data type
-- the time range and sub-sampling stride
-- optional geometry and time exports (`exportData`)
-- the array storage order
-
-Example:
-
-```plaintext
-dataDir       data;
-
-fields
+```text
+functions
 {
-    names       (p U);
-    dataType    float64;
-}
-
-exportData
-{
-    cellCentre   true;
-    cellVolumes  true;
-    writeTimes   true;
-    dataType     float64;
-}
-
-storageOrder   F;         // F or C
-
-time
-{
-    startTime   0.0;
-    endTime     0.5;
-    every       1;
+    numpyExport
+    {
+        type                foamToNumpy;
+        libs                (numpyFunctionObjects);
+        fields              (p U "T.*");
+        dataType            float64;
+        batchSize           100;
+        writeTimes          true;
+        writeCellCentres    true;
+        writeCellVolumes    true;
+        outputDir           "postProcessing/numpyExport";
+        writeControl        adjustableRunTime;
+        writeInterval       0.1;
+    }
 }
 ```
 
-#### Dictionary entries
+`fields` accepts OpenFOAM word/regular-expression selections. Supported field
+classes are volume scalar, vector, spherical-tensor, symmetric-tensor, and
+tensor fields. Only internal values are exported.
 
-| Entry | Description |
-|-------|-------------|
-| `dataDir` | Output directory for `.npy` files, relative to the case root (or absolute). Created automatically if it does not exist. |
-| `fields/names` | List of OpenFOAM field names to extract. |
-| `fields/dataType` | Numeric type for field output: `float32` or `float64` (default: `float64`). |
-| `exportData/cellCentre` | If `true`, exports cell-centre coordinates to `dataDir/cellCentre/cellCentre_proc_i.npy` with shape `(nCells, 3, 1)`. |
-| `exportData/cellVolumes` | If `true`, exports cell volumes to `dataDir/cellVolumes/cellVolumes_proc_i.npy` with shape `(nCells, 1)`. |
-| `exportData/writeTimes` | If `true`, exports the selected time values to `dataDir/times/times.npy` with shape `(nTimeSteps, 1)`. |
-| `exportData/dataType` | Numeric type for geometry/time exports: `float32` or `float64` (default: `float64`). |
-| `storageOrder` | Array storage order: `F` (Fortran/column-major) or `C` (C/row-major). |
-| `time/startTime` | First time step to include. |
-| `time/endTime` | Last time step to include. |
-| `time/every` | Sub-sampling stride: write every N-th time step within the range (e.g. `1` keeps all, `2` keeps every other). |
+The function object's output control is independent of the solver's general
+write control. Thus an export interval of 0.1 s works with a solver write
+interval of 1 s without creating native time directories every 0.1 s.
 
----
-
-> **Note — using both utilities in tandem.**
-> When `foamToNumpy` and `numpyToFoam` are used together, the time settings in their respective dictionaries must be consistent: the number of snapshots written by `foamToNumpy` must equal the number of time steps generated by `numpyToFoam`.
->
-> Given a case with time steps `0.1, 0.2, 0.3, 0.4, 0.5`, the following pair of settings selects all five snapshots and reconstructs them at the same time labels:
->
-> ```plaintext
-> # foamToNumpyDict          # numpyToFoamDict
-> time                       time
-> {                          {
->     startTime   0.1;           startTime   0.1;
->     endTime     0.5;           endTime     0.5;
->     every       1;             deltaT      0.1;
-> }                          }
-> ```
->
-> If `every 2` is used in `foamToNumpyDict` (selecting `0.1, 0.3, 0.5` — three snapshots), then `numpyToFoamDict` must generate exactly three time steps, e.g. `startTime 0.1`, `endTime 0.5`, `deltaT 0.2`.
-
----
-
-### Running the Utility
+Offline usage is the normal OpenFOAM workflow:
 
 ```bash
-mpirun -np 2 foamToNumpy -parallel
+postProcess -dict system/controlDict.numpy -time '0.1:1'
+mpirun -np 4 postProcess -parallel \
+    -dict system/controlDict.numpy -time '0.1:1'
 ```
 
-Replace `2` with the number of processors used for case decomposition.
+## Batched, crash-consistent layout
 
-> **Note — skip-on-conflict behaviour**
-> If the output directory for a field or an `exportData` entry already exists, that export is skipped with a warning and no data is overwritten. Remove or rename the existing output directories before re-running to avoid silent skips.
----
+For volume fields the output layout is:
 
-# For Developers
+```text
+postProcessing/numpyExport/
+└── 0/                         # invocation/restart segment
+    ├── segmentInfo
+    ├── batch_000000/
+    │   ├── state
+    │   ├── times.npy
+    │   ├── p_proc_0.npy
+    │   └── U_proc_0.npy
+    ├── batch_000001/
+    └── geometry_000000/
+        ├── cellCentres_proc_0.npy
+        └── cellVolumes_proc_0.npy
+```
 
-A unit test framework is provided to validate both utilities across multiple OpenFOAM versions using Apptainer containers. The pipeline runs an `icoFoam` cavity simulation, exports the results to `.npy` with `foamToNumpy`, reconstructs the fields with `numpyToFoam`, and verifies correctness by comparing MD5 checksums of the reconstructed processor field files against the original simulation output.
+Shapes are `(nCells, nOutputs)` for scalar fields and
+`(nCells, nComponents, nOutputs)` for non-scalar fields. A batch contains at
+most `batchSize` snapshots. The atomic `state` dictionary contains the
+authoritative committed count; consumers must ignore uncommitted trailing data
+after an interrupted write.
 
-**Tested OpenFOAM versions:** 2112, 2206, 2312, 2412, 2512 (tested versions)
+Each invocation creates a new non-overwriting segment. For example, if NumPy
+output is every 0.1 s, native solver output is every 1 s, and a run crashes at
+1.2 s before restarting from 1 s, the segments contain:
 
-For each version the following steps are executed in order:
+```text
+0/  -> 0.1 ... 1.0 1.1 1.2
+1/  ->           1.1 1.2 1.3 ...
+```
 
-| Step | Description |
-|------|-------------|
-| Build foamToNumpy | Compiles `src/foamToNumpy` using `wmake` inside the container |
-| Build numpyToFoam | Compiles `src/numpyToFoam` using `wmake` inside the container |
-| Run simulation | Runs the `./Allrun` script to execute the `icoFoam` cavity simulation |
-| Run foamToNumpy | Runs `foamToNumpy -parallel` to export simulation fields to `.npy` |
-| Clean processor data | Runs the `./Clean_proc_data` script to remove original field files from the processor directories |
-| Run numpyToFoam | Runs `numpyToFoam -parallel` to reconstruct fields from `.npy` |
-| Checksum comparison | Compares MD5 checksums of the reconstructed fields against the original simulation output |
+Both histories remain recoverable. Import can name several `segments` in
+precedence order; later segments replace duplicate times.
 
-A pass/fail status is printed for each step and version at the end of the run.
+## Volume import function object
 
----
+`numpyToFoam` imports the batched output and registers fields for subsequent
+function objects:
 
-## Local
+```text
+functions
+{
+    numpyImport
+    {
+        type                numpyToFoam;
+        libs                (numpyFunctionObjects);
+        inputDir            "postProcessing/numpyExport";
+        segment             "0";
+        // segments         (0 1);  // later entries replace duplicates
+        fields              (p U);
+        templateInstance    "0";
+        writeFields         false;
+        correctBoundaryConditions false;
+        executeControl      timeStep;
+        writeControl        timeStep;
+    }
+}
+```
 
-### Prerequisites
-- [Apptainer](https://apptainer.org) installed
+An existing registered field is updated in place. Otherwise, its file in
+`templateInstance` supplies the field class, dimensions, and boundary
+conditions. Boundary values are not present in the NumPy schema. Patch-field
+correction is disabled by default because model-coupled conditions such as
+wall functions and `fixedFluxPressure` must be updated by their owning models.
+Set `correctBoundaryConditions true` only when every imported field can be
+corrected independently. `writeFields` is opt-in.
 
-### Running
+## `numpyPostProcess`
+
+The driver imports fields and runs the `functions` dictionary in the same
+object registry. It avoids the NumPy -> native OpenFOAM -> function-object
+read/write cycle.
+
+For solver environments, the driver constructs thermo, transport, and
+turbulence objects from `templateInstance` before importing a snapshot. It
+then updates the model-owned fields, corrects independently evaluable patch
+fields, and revalidates the turbulence model. Effective viscosity and its wall
+functions are therefore refreshed for every imported time. Conditions owned
+by a discretised equation (`epsilonWallFunction`, `omegaWallFunction`, and
+`fixedFluxPressure`) retain their template values because their update requires
+equation data which does not exist during function-object post-processing. The
+`none` environment has no model context and is intended for independently
+correctable fields.
+
+```text
+input
+{
+    inputDir            "postProcessing/numpyExport";
+    segment             "0";
+    fields              (p U);
+    templateInstance    "0";
+}
+
+environment
+{
+    type                pimpleFoam;
+}
+
+functions
+{
+    importedForces
+    {
+        type            forces;
+        libs            (forces);
+        patches         (body);
+        rho             rhoInf;
+        rhoInf          1;
+        CofR            (0 0 0);
+        writeFields     true;
+    }
+}
+```
+
+Run it serially or on the original decomposition:
+
+```bash
+numpyPostProcess -time '0.1:1'
+mpirun -np 4 numpyPostProcess -parallel -time '0.1:1'
+```
+
+The environment adapters create the solver-owned objects required by
+function objects:
+
+| Environment | Solver aliases | Objects provided |
+|---|---|---|
+| `none` | — | Imported fields only |
+| `incompressible` | `simpleFoam`, `pimpleFoam` | `phi`, single-phase transport, optional turbulence |
+| `compressible` | `rhoSimpleFoam`, `rhoPimpleFoam` | fluid thermo, `rho`, `phi`, optional compressible turbulence |
+| `buoyantCompressible` | `buoyantPimpleFoam` | rho thermo, `rho`, `phi`, gravity, optional compressible turbulence |
+
+Laminar and turbulent cases share an adapter. The OpenFOAM runtime model
+selector reads `turbulenceProperties`; no duplicate laminar/turbulent adapter
+hierarchy is needed.
+
+Setting `writeFields true` in `input` makes the driver write the imported
+volume fields after correction. The default remains an entirely in-memory
+workflow.
+
+## Finite-area fields
+
+`finiteAreaToNumpy` and `finiteAreaToFoam` support scalar, vector,
+spherical-tensor, symmetric-tensor, and tensor area and edge fields. The
+layout adds the finite-area mesh name:
+
+```text
+postProcessing/areaExport/<area>/<segment>/batch_000000/
+```
+
+Example export:
+
+```text
+areaExport
+{
+    type                finiteAreaToNumpy;
+    libs                (numpyFunctionObjects);
+    area                region0;
+    areaFields          (Ts hs);
+    edgeFields          (phis phi2s);
+    outputDir           "postProcessing/areaExport";
+    batchSize           20;
+    writeAreaCentres    true;
+    writeEdgeCentres    true;
+}
+```
+
+Example import in `numpyPostProcessDict`:
+
+```text
+finiteAreaInput
+{
+    inputDir            "postProcessing/areaExport";
+    segment             "0";
+    area                region0;
+    areaFields          (Ts hs);
+    edgeFields          (phis phi2s);
+    templateInstance    "0";
+}
+```
+
+`input` and `finiteAreaInput` are independently optional, but at least one is
+required. When both are present their committed time sets must match. Multiple
+finite-area meshes can be selected with `areas (...)`.
+
+The buoyant adapter links the standard finite-area region models. This allows
+the `hotRoomWithThermalShell` setup to instantiate its thermal-shell model,
+import `Ts` and `hs`, and run standard consumers such as `areaWrite` directly.
+The v2506 tutorial uses the older model-qualified names `Ts_ceilingShell` and
+`h_ceilingShell`; the integration suite detects this layout and tests those
+fields instead.
+
+## Verification
+
+The extended integration suite uses OpenFOAM tutorial cases and performs
+export -> in-memory import -> re-export -> SHA-256/array equality checks:
+
+- the release-native parallel `icoFoam` cavity tutorial for volume batching,
+  online cadence, volume round-trip, and incompressible forces;
+- `rhoSimpleFoam/squareBend` for compressible forces, including pressure,
+  viscous, and total-force comparisons at two times after wall-viscosity
+  regeneration;
+- `buoyantPimpleFoam/hotRoomWithThermalShell` for the thermal-shell path;
+- `finiteArea/liquidFilmFoam/cylinder` for area and edge fields.
+
+The cavity mesh, initial fields, and numerical dictionaries are copied from
+the active release's `$FOAM_TUTORIALS`. The repository retains only a small
+test overlay containing the NumPy dictionaries, four-way decomposition, and
+the transport-model selector required by the post-processing environment.
+
+After building, run:
 
 ```bash
 cd unittest
-bash unittest.sh
+./Allrun-functionObjects
 ```
 
-On the **first run**, the script builds an Apptainer `.sif` image for each OpenFOAM version from Docker Hub and caches them in `unittest/of_versions/`. Subsequent runs reuse the cached images and skip the build step. Logs for each step are written to `unittest/run/of{version}/`.
+For isolated local testing against all supported release versions, use the
+Apptainer runner from an ordinary host shell. In addition to Apptainer, the
+runner requires `mksquashfs` to build images and SquashFS FUSE support to mount
+cached SIF images:
 
----
+```bash
+sudo apt-get install squashfs-tools squashfuse
+```
 
-## GitHub Actions
+`fuse2fs` is not required because the test images use SquashFS, not EXT3.
 
-The CI pipeline is defined in [`.github/workflows/main.yml`](.github/workflows/main.yml) and triggers automatically on every push and pull request. It runs `unittest/actions_unittest.sh`, which pulls pre-built Apptainer images from the GitHub Container Registry (GHCR) instead of building them locally, making it faster.
+On Ubuntu 23.10 and newer, an Apptainer installation built from source also
+needs an AppArmor profile permitting its starter to create user namespaces.
+GitHub release `.deb` packages install this profile automatically. For a source
+build installed under the default `/usr/local` prefix, create
+`/etc/apparmor.d/apptainer` with:
 
-To monitor a run, go to the **Actions** tab of the repository, select the `numpyToFoamTest` workflow, and open the latest run. If any step fails, the last few lines of every relevant log file are printed and the workflow exits with a non-zero status.
+```text
+# Permit unprivileged user namespace creation for Apptainer starter
+abi <abi/4.0>,
+include <tunables/global>
 
----
+profile apptainer /usr/local/libexec/apptainer/bin/starter{,-suid} flags=(unconfined) {
+    userns,
 
+    include if exists <local/apptainer>
+}
+```
 
+Reload AppArmor after installing the profile:
 
-# Limitations
+```bash
+sudo systemctl reload apparmor
+```
 
-1. **Parallel-only execution** (`numpyToFoam`, `foamToNumpy`)
-   - Serial execution is not supported by either utility
+See the official
+[Apptainer installation instructions](https://github.com/apptainer/apptainer/blob/main/INSTALL.md#apparmor-profile-ubuntu-2310)
+for other installation prefixes and the alternative system-wide setting.
 
-2. **Precision — `numpyToFoam`**
-   - If the input `.npy` files are stored in single precision (`float32`), the values are converted to OpenFOAM `scalar` precision during reading
-   - In most OpenFOAM builds, this means conversion to **double precision**
+After satisfying these host requirements, run:
 
-3. **No in-built post-processing** (`numpyToFoam`)
-   - Derived quantities cannot be computed directly within the utility
-   - Post-processing must be performed separately after reconstruction
+```bash
+cd unittest
+./unittest.sh
+```
 
-4. **No missing-time handling** (`numpyToFoam`, `foamToNumpy`)
-   - Data must exist for every time step defined in the `time` settings. If any time step has missing data, the utility will terminate abruptly without graceful exception handling
+It builds and caches NumPy-enabled OpenFOAM v2506, v2512, and v2606 images in
+`unittest/of_versions`, then builds the current source and runs the complete
+integration suite independently in each image. Select a subset with, for
+example, `OPENFOAM_VERSIONS="2512 2606" ./unittest.sh`. Set
+`REBUILD_IMAGES=1` to rebuild the cached images. If rootless image creation is
+not configured, use `APPTAINER_BUILD_WITH_SUDO=1 ./unittest.sh`; executing
+cached images does not require root. Per-version build and test logs are written
+below `unittest/run`.
 
-5. **No region-based data write** (`numpyToFoam`, `foamToNumpy`)
-   - Writing data for specific mesh regions is not currently supported
-   - This feature is planned for a future update
+The suite has been run successfully with v2506, v2512, v2606, and the current
+development line. GitHub Actions builds the function-object library and driver
+and runs this complete suite with v2506, v2512, and v2606.
 
-6. **Boundary data not supported** (`numpyToFoam`, `foamToNumpy`)
-   - Only internal cell data is read and written; boundary patch field values are not handled
+## Tutorials
 
-7. **Finite area fields not supported** (`numpyToFoam`, `foamToNumpy`)
-   - Only volumetric field types are supported;
+The examples under `tutorials/pod_time` and `tutorials/pod_parametric` use
+online `foamToNumpy` function objects and `numpyPostProcess`. Their Python
+scripts contain only the reduced-order calculation and batch assembly; solver
+model setup and post-processing remain in OpenFOAM dictionaries.
+
+## Legacy applications
+
+The original standalone applications and their dictionaries remain in
+`src/foamToNumpy`, `src/numpyToFoam`, and the existing unit tests. They use the
+old, non-batched schema and should be considered compatibility code. Once
+downstream workflows have migrated, they can be removed independently of the
+function-object library. Their remaining read/write paths also reject C-order
+arrays.

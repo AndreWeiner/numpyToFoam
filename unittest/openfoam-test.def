@@ -1,0 +1,18 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%post
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg
+    curl -L --fail --silent --show-error \
+        https://dl.openfoam.com/add-debian-repo.sh | bash
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        openfoam{{ openfoam_version }}-default \
+        python3-numpy
+    rm -rf /var/lib/apt/lists/*
+
+%labels
+    org.opencontainers.image.title OpenFOAM NumPy integration-test image
+    org.opencontainers.image.description OpenFOAM release image with NumPy

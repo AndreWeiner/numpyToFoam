@@ -1,0 +1,74 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Website:  www.openfoam.com                      |
+|   \\  /    A nd           |                                                 |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      thermalDriver;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+input
+{
+    inputDir            "postProcessing/thermalVolumeExport";
+    segment             "0";
+    fields              (p U p_rgh k epsilon);
+    templateInstance    "0";
+}
+
+finiteAreaInput
+{
+    inputDir            "postProcessing/thermalAreaExport";
+    segment             "0";
+    area                region0;
+    areaFields          (Ts hs);
+    edgeFields          ();
+    templateInstance    "0";
+}
+
+environment
+{
+    type                buoyantPimpleFoam;
+}
+
+functions
+{
+    thermalVolumeReExport
+    {
+        type            foamToNumpy;
+        libs            (numpyFunctionObjects);
+        fields          (p U p_rgh k epsilon);
+        outputDir       "postProcessing/thermalVolumeReExport";
+        batchSize       1;
+        writeControl    timeStep;
+    }
+
+    thermalAreaReExport
+    {
+        type            finiteAreaToNumpy;
+        libs            (numpyFunctionObjects);
+        area            region0;
+        areaFields      (Ts hs);
+        edgeFields      ();
+        outputDir       "postProcessing/thermalAreaReExport";
+        batchSize       1;
+        writeAreaCentres true;
+        writeControl    timeStep;
+    }
+
+    importedArea
+    {
+        type            areaWrite;
+        libs            (utilityFunctionObjects);
+        areas           (region0);
+        fields          (Ts hs);
+        surfaceFormat   vtk;
+        writeControl    timeStep;
+    }
+}

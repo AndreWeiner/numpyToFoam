@@ -1,0 +1,44 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Website:  www.openfoam.com                      |
+|   \\  /    A nd           |                                                 |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      numpyPostProcessDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+input
+{
+    inputDir            prediction_data;
+    segment             "0";
+    fields              (p U nuTilda);
+    templateInstance    "0";
+}
+
+environment
+{
+    type                simpleFoam;
+}
+
+functions
+{
+    importedForces
+    {
+        type            forces;
+        libs            (forces);
+        patches         (walls);
+        p               p;
+        U               U;
+        rho             rhoInf;
+        rhoInf          1;
+        CofR            (0.25 0 0);
+        writeControl    timeStep;
+    }
+}
