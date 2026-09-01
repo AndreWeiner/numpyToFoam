@@ -108,7 +108,7 @@ output is every 0.1 s, native solver output is every 1 s, and a run crashes at
 
 ```text
 0/  -> 0.1 ... 1.0 1.1 1.2
-1/  ->           1.1 1.2 1.3 ...
+1/  ->             1.1 1.2 1.3 ...
 ```
 
 Both histories remain recoverable. Import can name several `segments` in
@@ -204,7 +204,7 @@ The environment adapters create the solver-owned objects required by
 function objects:
 
 | Environment | Solver aliases | Objects provided |
-|---|---|---|
+| --- | --- | --- |
 | `none` | — | Imported fields only |
 | `incompressible` | `simpleFoam`, `pimpleFoam` | `phi`, single-phase transport, optional turbulence |
 | `compressible` | `rhoSimpleFoam`, `rhoPimpleFoam` | fluid thermo, `rho`, `phi`, optional compressible turbulence |
@@ -241,9 +241,15 @@ areaExport
     outputDir           "postProcessing/areaExport";
     batchSize           20;
     writeAreaCentres    true;
+    writeFaceAreas      true;
     writeEdgeCentres    true;
 }
 ```
+
+`writeFaceAreas` writes the positive finite-area face measures from
+`faMesh::S()` as `faceAreas_proc_<rank>.npy`. Together with
+`writeAreaCentres`, these values support area-weighted reductions without
+reading the native finite-area mesh.
 
 Example import in `numpyPostProcessDict`:
 
@@ -280,8 +286,11 @@ export -> in-memory import -> re-export -> SHA-256/array equality checks:
 - `rhoSimpleFoam/squareBend` for compressible forces, including pressure,
   viscous, and total-force comparisons at two times after wall-viscosity
   regeneration;
-- `buoyantPimpleFoam/hotRoomWithThermalShell` for the thermal-shell path;
-- `finiteArea/liquidFilmFoam/cylinder` for area and edge fields.
+- `buoyantPimpleFoam/hotRoomWithThermalShell` for turbulent and laminar
+  buoyant-compressible environments, the thermal-shell path, and finite-area
+  face-area geometry;
+- `finiteArea/liquidFilmFoam/cylinder` for area and edge fields and their
+  finite-area geometry.
 
 The cavity mesh, initial fields, and numerical dictionaries are copied from
 the active release's `$FOAM_TUTORIALS`. The repository retains only a small

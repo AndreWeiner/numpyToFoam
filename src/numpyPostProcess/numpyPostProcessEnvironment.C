@@ -257,12 +257,15 @@ public:
 
         if (turbulencePtr_)
         {
-            volScalarField& nut =
-                mesh_.lookupObjectRef<volScalarField>("nut");
+            volScalarField* nut =
+                mesh_.getObjectPtr<volScalarField>("nut");
 
-            for (auto& patchField : nut.boundaryFieldRef())
+            if (nut)
             {
-                patchField.setUpdated(false);
+                for (auto& patchField : nut->boundaryFieldRef())
+                {
+                    patchField.setUpdated(false);
+                }
             }
 
             turbulencePtr_->validate();
@@ -440,12 +443,15 @@ public:
 
         if (turbulencePtr_)
         {
-            volScalarField& nut =
-                mesh_.lookupObjectRef<volScalarField>("nut");
+            volScalarField* nut =
+                mesh_.getObjectPtr<volScalarField>("nut");
 
-            for (auto& patchField : nut.boundaryFieldRef())
+            if (nut)
             {
-                patchField.setUpdated(false);
+                for (auto& patchField : nut->boundaryFieldRef())
+                {
+                    patchField.setUpdated(false);
+                }
             }
 
             turbulencePtr_->validate();

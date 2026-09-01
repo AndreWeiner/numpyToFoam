@@ -67,6 +67,7 @@ class Foam::functionObjects::finiteAreaNumpyWriter
     const label batchSize_;
     const bool writeTimes_;
     const bool writeAreaCentres_;
+    const bool writeFaceAreas_;
     const bool writeEdgeCentres_;
     const fileName outputPath_;
 
@@ -439,7 +440,11 @@ class Foam::functionObjects::finiteAreaNumpyWriter
 
     void writeGeometry()
     {
-        if (!geometryDirty_ || (!writeAreaCentres_ && !writeEdgeCentres_))
+        if
+        (
+            !geometryDirty_
+         || (!writeAreaCentres_ && !writeFaceAreas_ && !writeEdgeCentres_)
+        )
         {
             geometryDirty_ = false;
             return;
@@ -472,6 +477,18 @@ class Foam::functionObjects::finiteAreaNumpyWriter
                 dtype_
             );
             writer.appendField(centres);
+        }
+
+        if (writeFaceAreas_)
+        {
+            const scalarField& areas = mesh_.S().field();
+            numpyDetail::numpyFileWriter writer
+            (
+                geometryPath/("faceAreas" + suffix),
+                {areas.size()},
+                dtype_
+            );
+            writer.appendField(areas);
         }
 
         if (writeEdgeCentres_)
@@ -518,6 +535,7 @@ public:
         batchSize_(dict.getOrDefault<label>("batchSize", 100)),
         writeTimes_(dict.getOrDefault("writeTimes", true)),
         writeAreaCentres_(dict.getOrDefault("writeAreaCentres", false)),
+        writeFaceAreas_(dict.getOrDefault("writeFaceAreas", false)),
         writeEdgeCentres_(dict.getOrDefault("writeEdgeCentres", false)),
         outputPath_(outputPath),
         segmentPath_(),

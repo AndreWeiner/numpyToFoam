@@ -41,6 +41,7 @@ functions
         outputDir       "postProcessing/edgeReExport";
         batchSize       1;
         writeAreaCentres true;
+        writeFaceAreas  true;
         writeEdgeCentres true;
         writeControl    timeStep;
     }

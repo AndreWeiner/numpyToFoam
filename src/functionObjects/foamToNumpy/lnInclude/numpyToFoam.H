@@ -1,1 +1,0 @@
-../numpyToFoam.H

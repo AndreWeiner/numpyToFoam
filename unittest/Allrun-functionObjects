@@ -111,11 +111,16 @@ cp -a \
     python3 "$python_check" \
         postProcessing/thermalVolumeExport/0 \
         postProcessing/thermalVolumeReExport/0 p U p_rgh k epsilon
-    python3 "$python_check" \
+    python3 "$python_check" --geometry \
         postProcessing/thermalAreaExport/region0/0 \
         postProcessing/thermalAreaReExport/region0/0 \
         "${thermal_area_fields[@]}"
     test -s postProcessing/importedArea/0/region0.vtp
+
+    foamDictionary constant/turbulenceProperties \
+        -entry simulationType -set laminar
+    echo "Running laminar environment regression"
+    numpyPostProcess -dict thermalDriver
 )
 
 echo "Running finite-area edge-field test"
@@ -135,7 +140,7 @@ cp -a "$FOAM_TUTORIALS/finiteArea/liquidFilmFoam/cylinder" \
     cp "$dict_dir/edgeDriver" system/edgeDriver
     postProcess -dict system/edgeExport -time 0.0002
     numpyPostProcess -dict edgeDriver -time 0.0002
-    python3 "$python_check" \
+    python3 "$python_check" --geometry \
         postProcessing/edgeExport/region0/0.0002 \
         postProcessing/edgeReExport/region0/0.0002 h Us phis phi2s
 )

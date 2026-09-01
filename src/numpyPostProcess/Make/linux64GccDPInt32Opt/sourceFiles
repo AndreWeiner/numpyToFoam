@@ -1,5 +1,0 @@
-SOURCE = \
-numpyPostProcessEnvironment.C \
-numpyPostProcess.C \
-
-# sources

@@ -59,6 +59,7 @@ functions
         outputDir       "postProcessing/thermalAreaReExport";
         batchSize       1;
         writeAreaCentres true;
+        writeFaceAreas  true;
         writeControl    timeStep;
     }
 
