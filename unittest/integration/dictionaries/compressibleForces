@@ -1,0 +1,44 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Website:  www.openfoam.com                      |
+|   \\  /    A nd           |                                                 |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      compressibleForces;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+input
+{
+    inputDir            "postProcessing/compressibleExport";
+    segment             "1";
+    fields              (p U rho T k epsilon);
+    templateInstance    "0";
+}
+
+environment
+{
+    type                rhoSimpleFoam;
+}
+
+functions
+{
+    importedForces
+    {
+        type            forces;
+        libs            (forces);
+        patches         (walls);
+        p               p;
+        U               U;
+        rho             rho;
+        CofR            (0 0 0);
+        writeFields     true;
+        writeControl    timeStep;
+    }
+}

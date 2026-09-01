@@ -1,0 +1,28 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Website:  www.openfoam.com                      |
+|   \\  /    A nd           |                                                 |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      thermalVolumeExport;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+functions
+{
+    thermalVolumeExport
+    {
+        type            foamToNumpy;
+        libs            (numpyFunctionObjects regionFaModels);
+        fields          (p U p_rgh k epsilon);
+        outputDir       "postProcessing/thermalVolumeExport";
+        batchSize       1;
+        writeControl    timeStep;
+    }
+}

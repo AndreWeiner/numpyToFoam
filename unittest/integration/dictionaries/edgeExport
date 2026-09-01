@@ -1,0 +1,33 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Website:  www.openfoam.com                      |
+|   \\  /    A nd           |                                                 |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      edgeExport;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+functions
+{
+    edgeExport
+    {
+        type            finiteAreaToNumpy;
+        libs            (numpyFunctionObjects);
+        area            region0;
+        areaFields      (h Us);
+        edgeFields      (phis phi2s);
+        outputDir       "postProcessing/edgeExport";
+        batchSize       1;
+        writeAreaCentres true;
+        writeFaceAreas  true;
+        writeEdgeCentres true;
+        writeControl    timeStep;
+    }
+}

@@ -239,7 +239,6 @@ int main(int argc, char *argv[])
 
     HashTable<NpyMeta> metaByField; // fieldName -> meta
 
-    bool hasRowMajor = false;
     bool hasSinglePrecision = false;
 
     label nFields = 0;
@@ -286,7 +285,9 @@ int main(int argc, char *argv[])
 
             if (!meta.fortranOrder)
             {
-                hasRowMajor = true;
+                FatalErrorInFunction
+                    << "C-order input is not supported: " << fullPath
+                    << exit(FatalError);
             }
             if (!meta.is_f8)
             {
@@ -310,14 +311,6 @@ int main(int argc, char *argv[])
             << exit(FatalError);
     }
 
-    if (hasRowMajor)
-    {
-        WarningInFunction
-            << "Detected row-major (C-order) numpy arrays." << nl
-            << "    Reading snapshots will be inefficient (non-contiguous access)." << nl
-            << "    Consider saving data in column-major (Fortran-order) "
-               "for better performance." << nl << endl;
-    }
     if (hasSinglePrecision)
     {
         WarningInFunction

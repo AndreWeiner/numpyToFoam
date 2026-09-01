@@ -1,0 +1,58 @@
+/*--------------------------------*- C++ -*----------------------------------*\
+| =========                 |                                                 |
+| \\      /  F ield         | OpenFOAM: The Open Source CFD Toolbox           |
+|  \\    /   O peration     | Website:  www.openfoam.com                      |
+|   \\  /    A nd           |                                                 |
+|    \\/     M anipulation  |                                                 |
+\*---------------------------------------------------------------------------*/
+FoamFile
+{
+    version     2.0;
+    format      ascii;
+    class       dictionary;
+    object      numpyPostProcessDict;
+}
+// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+input
+{
+    inputDir            "postProcessing/numpyExport";
+    segment             "0.1";
+    fields              (p U);
+    templateInstance    "0";
+}
+
+environment
+{
+    type                none;
+}
+
+functions
+{
+    numpyReExport
+    {
+        type            foamToNumpy;
+        libs            (numpyFunctionObjects);
+        fields          (p U);
+        outputDir       "postProcessing/numpyReExport";
+        batchSize       2;
+        writeControl    timeStep;
+    }
+
+    importedSums
+    {
+        type            volFieldValue;
+        libs            (fieldFunctionObjects);
+        fields          (p U);
+        operation       sum;
+        regionType      all;
+        writeFields     false;
+        scalingFactor   1;
+        writeToFile     true;
+        log             true;
+        executeControl  timeStep;
+        writeControl    timeStep;
+    }
+}
+
+// ************************************************************************* //

@@ -46,6 +46,10 @@ int main(int argc, char *argv[])
     #include "createMesh.H"
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
+    WarningInFunction
+        << "The foamToNumpy application is deprecated. Use the "
+        << "foamToNumpy function object for new workflows." << endl;
+
     Info << nl;
     runTime.printExecutionTime(Info);
     const word dictName("foamToNumpyDict");
@@ -93,8 +97,15 @@ int main(int argc, char *argv[])
         dtype_export = parseNpyType(dataTypeWord_export);
     }
 
-    const word storageOrderWord = dict.getOrDefault<word>("storageOrder", "C");
+    const word storageOrderWord = dict.getOrDefault<word>("storageOrder", "F");
     const bool fortranOrder = parseFortranOrder(storageOrderWord);
+
+    if (!fortranOrder)
+    {
+        FatalIOErrorInFunction(dict)
+            << "C-order output is no longer supported. Use storageOrder F."
+            << exit(FatalIOError);
+    }
 
     fileName dataDir(dict.getOrDefault<fileName>("dataDir", "data"));
     if (!dataDir.isAbsolute())

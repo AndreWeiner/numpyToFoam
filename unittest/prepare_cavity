@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+#------------------------------------------------------------------------------
+
+set -eo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source_case="${FOAM_TUTORIALS:?}/incompressible/icoFoam/cavity/cavity"
+target_case="${1:?Usage: prepare_cavity TARGET_CASE}"
+
+if [[ ! -d "$source_case" ]]; then
+    echo "OpenFOAM cavity tutorial not found: $source_case" >&2
+    exit 1
+fi
+
+if [[ -e "$target_case" ]]; then
+    echo "Target cavity case already exists: $target_case" >&2
+    exit 1
+fi
+
+cp -a "$source_case" "$target_case"
+cp -a "$script_dir/integration/cavity/." "$target_case/"
+
+foamDictionary "$target_case/constant/transportProperties" \
+    -entry transportModel -set Newtonian
+foamDictionary "$target_case/system/decomposeParDict" \
+    -entry numberOfSubdomains -set 4
+foamDictionary "$target_case/system/decomposeParDict" \
+    -entry method -set simple
+foamDictionary "$target_case/system/decomposeParDict" \
+    -entry coeffs/n -set '(2 2 1)'
+
+#------------------------------------------------------------------------------

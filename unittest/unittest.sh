@@ -1,180 +1,119 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #------------------------------------------------------------------------------
 
-# definition of path variables
-main_folder="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-echo "$main_folder"
+set -uo pipefail
 
-run_folder="$main_folder/run"
-simulation_base_name="$main_folder/of_cavity"
-versions_folder_name="$main_folder/of_versions"
-SRC_FOLDER="$main_folder/../src"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd -- "$script_dir/.." && pwd)"
+image_dir="$script_dir/of_versions"
+run_dir="$script_dir/run"
+definition="$script_dir/openfoam-test.def"
+build_jobs="${JOBS:-$(nproc)}"
+read -r -a versions <<< "${OPENFOAM_VERSIONS:-2506 2512 2606}"
 
-echo "Starting test"
-mkdir -p "$run_folder"
+if ! command -v apptainer >/dev/null 2>&1; then
+    echo "Apptainer was not found on PATH" >&2
+    exit 1
+fi
 
-# ----------------------------------------------------------------------
-# function: make checksum manifest for processor files
-# ----------------------------------------------------------------------
-makeChecksumManifest() {
-    case_dir="$1"
-    out_file="$2"
+if ! command -v mksquashfs >/dev/null 2>&1; then
+    echo "mksquashfs was not found; install the squashfs-tools package" >&2
+    exit 1
+fi
 
-    (
-        cd "$case_dir" || exit 1
+mkdir -p "$image_dir" "$run_dir"
 
-        find processor* -type f \
-            ! -path "*/constant/polyMesh/*" \
-            ! -path "*/uniform/*" \
-            ! -name "phi" \
-            -print0 \
-        | sort -z \
-        | xargs -0 -r md5sum
-    ) > "$out_file"
-}
+overall_status=0
 
-# ----------------------------------------------------------------------
-# function: compare two checksum manifests
-# ----------------------------------------------------------------------
-compareChecksumManifest() {
-    ref_file="$1"
-    new_file="$2"
-    diff_file="$3"
-
-    ref_hashes="${ref_file}.hashes"
-    new_hashes="${new_file}.hashes"
-
-    awk '{print $1}' "$ref_file" > "$ref_hashes"
-    awk '{print $1}' "$new_file" > "$new_hashes"
-
-    diff -u "$ref_hashes" "$new_hashes" > "$diff_file" 2>&1
-    status=$?
-
-    rm -f "$ref_hashes" "$new_hashes"
-    return $status
-}
-
-versions=(2112 2206 2312 2412 2512)
-
-mkdir -p "$versions_folder_name"
+apptainer_build=(apptainer build)
+if [[ "${APPTAINER_BUILD_WITH_SUDO:-0}" == 1 ]]; then
+    apptainer_build=(sudo apptainer build)
+fi
 
 for version in "${versions[@]}"; do
-    sif_file="$versions_folder_name/openfoam$version.sif"
+    image="$image_dir/openfoam${version}-test.sif"
+    image_log="$image_dir/openfoam${version}-test.image.log"
+    version_dir="$run_dir/of${version}"
+    work_dir="$version_dir/work"
+    build_log="$version_dir/build.log"
+    test_log="$version_dir/test.log"
 
-    if [ ! -f "$sif_file" ]; then
-        echo "Building $sif_file"
-        cd "$versions_folder_name" || exit 1
-        sudo apptainer build "openfoam$version.sif" "docker://opencfd/openfoam-default:$version"
-    else
-        echo "$sif_file already exists, skipping build"
-    fi
-done
+    mkdir -p "$version_dir"
 
-for version in "${versions[@]}"; do
-
-    foamToNumpy_build_ok=0
-    numpyToFoam_build_ok=0
-    allrun_ok=0
-    foamToNumpy_run_ok=0
-    clean_proc_data_ok=0
-    numpyToFoam_run_ok=0
-    checksum_ok=0
-
-    cd "$run_folder" || exit 1
-
-    version_folder="$run_folder/of$version"
-    mkdir -p "$version_folder"
-    cd "$version_folder" || exit 1
-
-    image="$versions_folder_name/openfoam$version.sif"
-    source="source /usr/lib/openfoam/openfoam$version/etc/bashrc"
-
-    log_foamToNumpy_build="$version_folder/log.foamToNumpy.build"
-    log_numpyToFoam_build="$version_folder/log.numpyToFoam.build"
-    log_allrun="$version_folder/log.Allrun"
-    log_foamToNumpy_run="$version_folder/log.foamToNumpy"
-    log_clean_proc_data="$version_folder/log.Clean_proc_data"
-    log_numpyToFoam_run="$version_folder/log.numpyToFoam"
-
-    checksum_ref="$version_folder/checksum.reference.md5"
-    checksum_final="$version_folder/checksum.final.md5"
-    checksum_diff="$version_folder/checksum.diff"
-
-    : > "$log_foamToNumpy_build"
-    : > "$log_numpyToFoam_build"
-    : > "$log_allrun"
-    : > "$log_foamToNumpy_run"
-    : > "$log_clean_proc_data"
-    : > "$log_numpyToFoam_run"
-
-    cp -r "$SRC_FOLDER" .
-
-    FOAMTONUMPY="$version_folder/src/foamToNumpy"
-    cd "$FOAMTONUMPY" || exit 1
-    apptainer exec "$image" bash -lc "$source && wmake" \
-        > "$log_foamToNumpy_build" 2>&1
-    foamToNumpy_build_ok=$(( $? == 0 ))
-
-    NUMPYTOFOAM="$version_folder/src/numpyToFoam"
-    cd "$NUMPYTOFOAM" || exit 1
-    apptainer exec "$image" bash -lc "$source && wmake" \
-        > "$log_numpyToFoam_build" 2>&1
-    numpyToFoam_build_ok=$(( $? == 0 ))
-
-    cd "$version_folder" || exit 1
-    cp -r "$simulation_base_name" .
-
-    case_dir="$version_folder/of_cavity"
-    cd "$case_dir" || exit 1
-
-    apptainer exec "$image" bash -lc "$source && ./Allrun" \
-        > "$log_allrun" 2>&1
-    allrun_ok=$(( $? == 0 ))
-
-    # save reference checksums after original simulation
-    if [ "$allrun_ok" -eq 1 ]; then
-        makeChecksumManifest "$case_dir" "$checksum_ref"
-    fi
-
-    mpirun -np 4 apptainer exec "$image" bash -lc "$source && foamToNumpy -parallel" \
-        > "$log_foamToNumpy_run" 2>&1
-    foamToNumpy_run_ok=$(( $? == 0 ))
-
-    apptainer exec "$image" bash -lc "$source && ./Clean_proc_data" \
-        > "$log_clean_proc_data" 2>&1
-    clean_proc_data_ok=$(( $? == 0 ))
-
-    mpirun -np 4 apptainer exec "$image" bash -lc "$source && numpyToFoam -parallel" \
-        > "$log_numpyToFoam_run" 2>&1
-    numpyToFoam_run_ok=$(( $? == 0 ))
-
-    # compare checksums after numpyToFoam
-    if [ "$numpyToFoam_run_ok" -eq 1 ] && [ -f "$checksum_ref" ]; then
-        makeChecksumManifest "$case_dir" "$checksum_final"
-
-        if compareChecksumManifest "$checksum_ref" "$checksum_final" "$checksum_diff"; then
-            checksum_ok=1
-        else
-            checksum_ok=0
+    if [[ ! -f "$image" || "${REBUILD_IMAGES:-0}" == 1 ]]; then
+        echo "Building OpenFOAM $version test image"
+        if ! "${apptainer_build[@]}" --force \
+            --build-arg "openfoam_version=$version" \
+            "$image" "$definition" >"$image_log" 2>&1; then
+            echo "OpenFOAM $version: image build failed; see $image_log" >&2
+            tail -n 80 "$image_log" >&2
+            overall_status=1
+            continue
         fi
+    else
+        echo "Using cached image $image"
     fi
-    
-    foamToNumpy_build_status=$([ "$foamToNumpy_build_ok" -eq 1 ] && echo "success" || echo "failed")
-    numpyToFoam_build_status=$([ "$numpyToFoam_build_ok" -eq 1 ] && echo "success" || echo "failed")
-    allrun_status=$([ "$allrun_ok" -eq 1 ] && echo "success" || echo "failed")
-    foamToNumpy_run_status=$([ "$foamToNumpy_run_ok" -eq 1 ] && echo "success" || echo "failed")
-    clean_proc_data_status=$([ "$clean_proc_data_ok" -eq 1 ] && echo "success" || echo "failed")
-    numpyToFoam_run_status=$([ "$numpyToFoam_run_ok" -eq 1 ] && echo "success" || echo "failed")
-    checksum_status=$([ "$checksum_ok" -eq 1 ] && echo "success" || echo "failed")
-    
-    echo "----------------------------------------"
-    echo "Version: $version"
-    echo "foamToNumpy build      : $foamToNumpy_build_status"
-    echo "numpyToFoam build      : $numpyToFoam_build_status"
-    echo "Allrun                 : $allrun_status"
-    echo "foamToNumpy run        : $foamToNumpy_run_status"
-    echo "Clean_proc_data        : $clean_proc_data_status"
-    echo "numpyToFoam run        : $numpyToFoam_run_status"
-    echo "checksum match         : $checksum_status"
-    echo "----------------------------------------"
+
+    rm -rf -- "$work_dir"
+    mkdir -p "$work_dir/unittest"
+    cp -a "$repo_dir/src" "$repo_dir/Allwmake" "$work_dir/"
+    find "$work_dir/src" -type d -path '*/Make/linux*' -prune \
+        -exec rm -rf -- {} +
+    cp -a \
+        "$script_dir/Allrun-functionObjects" \
+        "$script_dir/check_forces.py" \
+        "$script_dir/check_function_object.py" \
+        "$script_dir/check_numpy_roundtrip.py" \
+        "$script_dir/integration" \
+        "$script_dir/prepare_cavity" \
+        "$work_dir/unittest/"
+
+    echo "Building with OpenFOAM $version"
+    if ! apptainer exec --cleanenv "$image" bash -lc "
+        source /usr/lib/openfoam/openfoam${version}/etc/bashrc
+        set -eo pipefail
+        export FOAM_USER_APPBIN=\"$version_dir/platforms/\$WM_OPTIONS/bin\"
+        export FOAM_USER_LIBBIN=\"$version_dir/platforms/\$WM_OPTIONS/lib\"
+        export PATH=\"\$FOAM_USER_APPBIN:\$PATH\"
+        export LD_LIBRARY_PATH=\"\$FOAM_USER_LIBBIN:\$LD_LIBRARY_PATH\"
+        export WM_NCOMPPROCS='$build_jobs'
+        mkdir -p \"\$FOAM_USER_APPBIN\" \"\$FOAM_USER_LIBBIN\"
+        cd '$work_dir'
+        ./Allwmake
+    " >"$build_log" 2>&1; then
+        echo "OpenFOAM $version: build failed; see $build_log" >&2
+        tail -n 80 "$build_log" >&2
+        overall_status=1
+        continue
+    fi
+
+    echo "Running the integration suite with OpenFOAM $version"
+    if ! apptainer exec --cleanenv "$image" bash -lc "
+        source /usr/lib/openfoam/openfoam${version}/etc/bashrc
+        set -eo pipefail
+        export FOAM_USER_APPBIN=\"$version_dir/platforms/\$WM_OPTIONS/bin\"
+        export FOAM_USER_LIBBIN=\"$version_dir/platforms/\$WM_OPTIONS/lib\"
+        export PATH=\"\$FOAM_USER_APPBIN:\$PATH\"
+        export LD_LIBRARY_PATH=\"\$FOAM_USER_LIBBIN:\$LD_LIBRARY_PATH\"
+        export OMPI_MCA_rmaps_base_oversubscribe=1
+        cd '$work_dir'
+        ./unittest/Allrun-functionObjects
+    " >"$test_log" 2>&1; then
+        echo "OpenFOAM $version: tests failed; see $test_log" >&2
+        tail -n 120 "$test_log" >&2
+        overall_status=1
+        continue
+    fi
+
+    echo "OpenFOAM $version: build and tests passed"
 done
+
+if (( overall_status != 0 )); then
+    echo "One or more OpenFOAM versions failed" >&2
+else
+    echo "All requested OpenFOAM versions passed"
+fi
+
+exit "$overall_status"
+
+#------------------------------------------------------------------------------

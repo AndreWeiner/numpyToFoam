@@ -1,0 +1,11 @@
+foamNumpyCoreCompat.C
+foamNumpyCoreAdapter.C
+numpyFileReader.C
+numpyInputCatalog.C
+numpyFileWriter.C
+foamToNumpy.C
+numpyToFoam.C
+finiteAreaToNumpy.C
+finiteAreaToFoam.C
+
+LIB = $(FOAM_MODULE_LIBBIN)/libnumpyFunctionObjects
